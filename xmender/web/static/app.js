@@ -467,19 +467,19 @@ function gmailModal(defaults, g, reload) {
 }
 
 function discordModal(d, reload) {
-  const name = h('input', { type: 'text', value: d ? d.name : 'xMender', maxlength: 80 });
+  const name = h('input', { type: 'text', value: d ? d.name : 'xMender', maxlength: 128 });
   const url = h('input', { type: 'url', autocomplete: 'off', placeholder: d ? '(unchanged)' : 'https://discord.com/api/webhooks/…' });
   const err = h('p', { class: 'error-box hidden' });
   modal(d ? 'Edit Discord webhook' : 'Connect Discord webhook',
     'Channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL.',
     h('div', {}, err,
-      field('Name', name, 'Display name for xMender itself; shown as the message author.'),
+      field('Name', name, 'Label for this webhook inside xMender. Messages use the name and avatar set on the webhook in Discord.'),
       field('Webhook URL', url, (d ? 'Leave empty to keep the stored one. ' : '') + 'Old discordapp.com and /api/vNN URLs are accepted and normalised. For a forum channel, add ?thread_id=… or a new thread is created per message.')),
     (close) => [
       h('button', { onclick: close }, 'Cancel'),
       h('button', { class: 'primary', onclick: () => {
         err.classList.add('hidden');
-        discordTestChoice(name.value, async (mode) => {
+        discordTestChoice(async (mode) => {
           try {
             const r = await api('POST', '/api/integrations/discord', { id: d ? d.id : null, name: name.value, url: url.value || null, test: mode });
             toast(r.tested ? 'Test message sent and webhook saved.' : 'Webhook saved without testing.', 'ok');
@@ -490,12 +490,12 @@ function discordModal(d, reload) {
     ]);
 }
 
-function discordTestChoice(name, done) {
+function discordTestChoice(done) {
   modal('Test the webhook?', null, h('div', {},
     h('div', { class: 'callout' },
       h('strong', {}, 'A real message will be posted. '),
       'Discord webhooks can only be verified by sending to them. Testing posts one embed titled ',
-      h('code', {}, 'xMender Notification'), ` from "${name || 'xMender'}" into the webhook's channel, visible to everyone there.`),
+      h('code', {}, 'xMender Notification'), " into the webhook's channel, under the webhook's own name, visible to everyone there."),
     h('p', { class: 'small muted' }, 'Skipping saves without any check; a wrong URL only shows up when a task first tries to send.')),
   (close) => [
     h('button', { onclick: close }, 'Cancel'),

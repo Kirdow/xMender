@@ -115,7 +115,7 @@ def test_pipeline_runs_and_stops(monkeypatch):
     ctx = pipeline.RunContext(api_key="k", default_model="d", discord={7: ("Bot", "https://hook")})
     res = pipeline.run_task(steps, make_mail(), ctx)
     assert res.status == "completed"
-    assert calls and calls[0][1]["description"] == "Summary" and calls[0][1]["username"] == "Bot"
+    assert calls and calls[0][1]["description"] == "Summary" and "username" not in calls[0][1]
 
     res = pipeline.run_task(steps, make_mail(subject="hello"), ctx)
     assert res.status == "stopped" and len(res.log) == 1
@@ -135,7 +135,7 @@ def test_validate_steps():
     assert out == [{"type": "filter_agent", "config": {"instructions": "x", "model": "a"}}]
 
 
-def test_discord_error_details_and_names():
+def test_discord_error_details():
     import httpx
 
     body = {"code": 50035, "message": "Invalid Form Body", "errors": {
@@ -143,6 +143,3 @@ def test_discord_error_details_and_names():
         "embeds": {"0": {"description": {"_errors": [{"code": "BASE_TYPE_MAX_LENGTH", "message": "Too long"}]}}}}}
     text = discord._error_text(httpx.Response(400, json=body))
     assert "username: Username cannot contain" in text and "embeds.0.description: Too long" in text
-    assert discord.username_problem("xMender") is None
-    assert discord.username_problem("My Discord Bot")
-    assert discord.username_problem("everyone")

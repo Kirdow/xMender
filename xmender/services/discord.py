@@ -22,7 +22,6 @@ API_BASE = "https://discord.com/api/v10"
 EMBED_TITLE = "xMender Notification"
 EMBED_COLOR = 0x00FFFF  # bright aqua
 EMBED_DESCRIPTION_LIMIT = 4096
-USERNAME_LIMIT = 80
 
 _URL_RE = re.compile(
     r"^https://(?:(?:canary|ptb)\.)?discord(?:app)?\.com/api(?:/v\d+)?/webhooks/(\d{5,25})/([A-Za-z0-9_\-]{20,200})/?$"
@@ -72,7 +71,6 @@ def clip(text: str, limit: int) -> str:
 def send_embed(
     webhook_url: str,
     *,
-    username: str,
     description: str,
     footer: str | None = None,
     thread_name: str | None = None,
@@ -91,8 +89,6 @@ def send_embed(
         # Never ping anyone, whatever the generated text contains.
         "allowed_mentions": {"parse": []},
     }
-    if username:
-        payload["username"] = clip(username, USERNAME_LIMIT)
 
     params: dict = {"wait": "true"}
     if hook.thread_id:
@@ -155,20 +151,3 @@ def _error_text(r: httpx.Response) -> str:
         msg += " (" + "; ".join(details) + ")"
     return msg[:600]
 
-
-# Discord refuses webhook usernames containing these (case-insensitive).
-_FORBIDDEN_NAME_PARTS = ("discord", "clyde")
-_FORBIDDEN_NAMES = ("everyone", "here")
-
-
-def username_problem(name: str) -> str | None:
-    n = name.strip().lower()
-    if not n:
-        return "Name is required."
-    if len(n) > USERNAME_LIMIT:
-        return f"Name must be at most {USERNAME_LIMIT} characters."
-    if any(p in n for p in _FORBIDDEN_NAME_PARTS):
-        return 'Discord does not allow "discord" or "clyde" in webhook names.'
-    if n in _FORBIDDEN_NAMES:
-        return f'Discord does not allow "{name.strip()}" as a webhook name.'
-    return None

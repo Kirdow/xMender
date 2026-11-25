@@ -214,7 +214,7 @@ async def toggle_smtp(
 
 class DiscordBody(BaseModel):
     id: int | None = None
-    name: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=128)
     url: str | None = None  # blank on edit keeps the stored one
     test: Literal["send", "skip"]
 
@@ -233,12 +233,10 @@ async def save_discord(body: DiscordBody, db: Session = Depends(get_db), user: U
         raise HTTPException(400, "Webhook URL is required.")
 
     name = body.name.strip()
-    if problem := discord.username_problem(name):
-        raise HTTPException(400, problem)
     if body.test == "send":
         try:
             await asyncio.to_thread(
-                discord.send_embed, url, username=name, description=DISCORD_TEST_TEXT,
+                discord.send_embed, url, description=DISCORD_TEST_TEXT,
                 thread_name="xMender test",
             )
         except discord.DiscordError as e:

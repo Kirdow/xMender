@@ -137,7 +137,6 @@ def run_task(steps: list[dict[str, Any]], mail: ParsedEmail, ctx: RunContext) ->
                 name, url = hook
                 discord.send_embed(
                     url,
-                    username=name,
                     description=res.text,
                     footer=f"Subject: {mail.subject}" if mail.subject else None,
                     thread_name=mail.subject or None,
