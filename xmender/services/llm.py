@@ -26,6 +26,10 @@ _FALLBACK_MODELS = {
 }
 _FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
+# Display order of model families in pickers, most capable first. Unknown
+# families go last. Within a family the API's newest-first order is kept.
+_TIER_ORDER = ("fable", "mythos", "opus", "sonnet", "haiku")
+
 
 class LLMError(Exception):
     """User-presentable failure."""
@@ -58,6 +62,19 @@ def _key_id(api_key: str) -> str:
     return hashlib.sha256(api_key.encode()).hexdigest()
 
 
+def _tier_rank(model_id: str) -> int:
+    parts = model_id.lower().split("-")
+    for rank, tier in enumerate(_TIER_ORDER):
+        if tier in parts:
+            return rank
+    return len(_TIER_ORDER)
+
+
+def sort_models(models: list[ModelInfo]) -> list[ModelInfo]:
+    """Group by tier; stable, so the API's newest-first order holds per tier."""
+    return sorted(models, key=lambda m: _tier_rank(m.id))
+
+
 def list_models(api_key: str, *, refresh: bool = False) -> list[ModelInfo]:
     kid = _key_id(api_key)
     now = time.monotonic()
@@ -82,6 +99,7 @@ def list_models(api_key: str, *, refresh: bool = False) -> list[ModelInfo]:
         raise LLMError("Could not reach the Anthropic API.") from e
     except anthropic.APIStatusError as e:
         raise LLMError(f"Anthropic API error {e.status_code} while listing models.") from e
+    models = sort_models(models)
     with _cache_lock:
         _cache[kid] = (now, models)
     return models

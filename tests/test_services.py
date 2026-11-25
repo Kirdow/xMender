@@ -2,7 +2,7 @@ from email.message import EmailMessage
 
 import pytest
 
-from xmender.services import discord, filters, gmail, pipeline, prompts
+from xmender.services import discord, filters, gmail, llm, pipeline, prompts
 
 
 def make_mail(**kw) -> gmail.ParsedEmail:
@@ -143,3 +143,13 @@ def test_discord_error_details():
         "embeds": {"0": {"description": {"_errors": [{"code": "BASE_TYPE_MAX_LENGTH", "message": "Too long"}]}}}}}
     text = discord._error_text(httpx.Response(400, json=body))
     assert "username: Username cannot contain" in text and "embeds.0.description: Too long" in text
+
+
+def test_sort_models_groups_by_tier():
+    ids = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2",
+           "claude-opus-5", "claude-future-1", "claude-fable-5-1", "claude-mythos-5-2",
+           "claude-sonnet-5"]
+    got = [m.id for m in llm.sort_models([llm.ModelInfo(i, i, None) for i in ids])]
+    assert got == ["claude-fable-5-2", "claude-fable-5-1", "claude-mythos-5-2",
+                   "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "claude-sonnet-5",
+                   "claude-haiku-5-5", "claude-future-1"]
