@@ -13,6 +13,8 @@ from dataclasses import dataclass
 
 import anthropic
 
+from . import pricing
+
 MODEL_CACHE_SECONDS = 600
 DEFAULT_MAX_TOKENS = 16000
 
@@ -43,10 +45,30 @@ class ModelInfo:
 
 
 @dataclass(frozen=True)
+class UsageAttempt:
+    """Token usage of one model attempt within a call. A call with a refusal
+    fallback has one attempt per model that ran; each bills at its own rates."""
+
+    model: str
+    tokens: pricing.Tokens
+    # message: served the reply; declined: refused, a fallback took over;
+    # refused: the final reply is a refusal.
+    kind: str = "message"
+    billed: bool = True
+    inference_geo: str | None = None
+
+    def cost_nanos(self) -> int | None:
+        if not self.billed:
+            return 0
+        return pricing.cost_nanos(self.model, self.tokens, inference_geo=self.inference_geo)
+
+
+@dataclass(frozen=True)
 class LLMResult:
     text: str
     stop_reason: str | None
     model: str
+    usage: tuple[UsageAttempt, ...] = ()
 
 
 _cache: dict[str, tuple[float, list[ModelInfo]]] = {}
@@ -148,4 +170,75 @@ def complete(api_key: str, model: str, system: str, user: str) -> LLMResult:
         raise LLMError(f"Anthropic API error {e.status_code}.") from e
 
     text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
-    return LLMResult(text=text, stop_reason=resp.stop_reason, model=resp.model)
+    return LLMResult(
+        text=text, stop_reason=resp.stop_reason, model=resp.model, usage=usage_attempts(resp, model)
+    )
+
+
+def _int(obj: object, name: str) -> int:
+    return int(getattr(obj, name, None) or 0)
+
+
+def _tokens(u: object) -> pricing.Tokens:
+    write_total = _int(u, "cache_creation_input_tokens")
+    cc = getattr(u, "cache_creation", None)
+    if cc is not None:
+        w5, w1 = _int(cc, "ephemeral_5m_input_tokens"), _int(cc, "ephemeral_1h_input_tokens")
+        # Anything the breakdown does not cover bills at the cheaper 5-minute rate.
+        w5 += max(0, write_total - w5 - w1)
+    else:
+        w5, w1 = write_total, 0
+    return pricing.Tokens(
+        input=_int(u, "input_tokens"),
+        output=_int(u, "output_tokens"),
+        cache_write_5m=w5,
+        cache_write_1h=w1,
+        cache_read=_int(u, "cache_read_input_tokens"),
+    )
+
+
+def usage_attempts(resp: object, requested_model: str) -> tuple[UsageAttempt, ...]:
+    """Billable usage of a Messages response, split per model attempt.
+
+    With server-side fallbacks, `usage.iterations` is the per-attempt billing
+    record and top-level `usage` covers only the final attempt.
+    """
+    usage = getattr(resp, "usage", None)
+    if usage is None:
+        return ()
+    geo = getattr(usage, "inference_geo", None)
+    served = getattr(resp, "model", None) or requested_model
+    stop_details = getattr(resp, "stop_details", None)
+    refused = getattr(resp, "stop_reason", None) == "refusal"
+
+    iterations = [
+        it for it in (getattr(usage, "iterations", None) or [])
+        if getattr(it, "type", None) in ("message", "fallback_message")
+    ]
+    if iterations:
+        raw = [
+            (getattr(it, "model", None) or (requested_model if i == 0 else served), _tokens(it))
+            for i, it in enumerate(iterations)
+        ]
+    else:
+        raw = [(served, _tokens(usage))]
+
+    out: list[UsageAttempt] = []
+    last = len(raw) - 1
+    for i, (model, toks) in enumerate(raw):
+        if i < last:
+            # An earlier attempt declined and a fallback ran. Its refusal
+            # category is not reported, so it is counted as billed (worst case).
+            out.append(UsageAttempt(model, toks, kind="declined", inference_geo=geo))
+            continue
+        billed = True
+        if refused and toks.output == 0:
+            category = getattr(stop_details, "category", None)
+            billed = category in pricing.BILLED_REFUSAL_CATEGORIES
+        out.append(
+            UsageAttempt(
+                model, toks, kind="refused" if refused else "message", billed=billed,
+                inference_geo=geo,
+            )
+        )
+    return tuple(out)

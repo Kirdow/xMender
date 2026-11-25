@@ -153,3 +153,72 @@ def test_sort_models_groups_by_tier():
     assert got == ["claude-fable-5-2", "claude-fable-5-1", "claude-mythos-5-2",
                    "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "claude-sonnet-5",
                    "claude-haiku-5-5", "claude-future-1"]
+
+
+# --- pricing / usage ---
+
+def test_pricing_cost_nanos():
+    from xmender.services import pricing
+
+    t = pricing.Tokens(input=1000, output=200)
+    # $4/MTok * 1000 + $20/MTok * 200 = $0.008
+    assert pricing.cost_nanos("claude-opus-5-5", t) == 8_000_000
+    assert pricing.cost_nanos("claude-haiku-4-5-20251001", t) == 2_000_000
+    assert pricing.cost_nanos("claude-opus-5-5", t, inference_geo="us") == 8_800_000
+    assert pricing.cost_nanos("claude-unknown-9", t) is None
+    # cache: 5m write 1.25x, 1h write 2x, Opus 5.5 read $0.20
+    c = pricing.Tokens(cache_write_5m=1000, cache_write_1h=1000, cache_read=1000)
+    assert pricing.cost_nanos("claude-opus-5-5", c) == (5 + 8 + 0.2) * 1000 * 1000
+    # Haiku 5.5: smallest rate stays exact; long prompts use the second card
+    assert pricing.cost_nanos("claude-haiku-5-5", pricing.Tokens(cache_read=1)) == 10
+    assert pricing.cost_nanos("claude-haiku-5-5", pricing.Tokens(input=100_000)) == 10_000_000
+    assert pricing.cost_nanos("claude-haiku-5-5", pricing.Tokens(input=100_001)) == 50_000_500
+
+
+def _resp(model, usage, stop_reason="end_turn", category=None):
+    from types import SimpleNamespace as NS
+
+    return NS(model=model, usage=usage, stop_reason=stop_reason,
+              stop_details=NS(category=category) if category else None)
+
+
+def test_usage_attempts():
+    from types import SimpleNamespace as NS
+
+    u = NS(input_tokens=10, output_tokens=5, cache_creation_input_tokens=30,
+           cache_read_input_tokens=7, cache_creation=NS(ephemeral_5m_input_tokens=10,
+                                                        ephemeral_1h_input_tokens=20))
+    [a] = llm.usage_attempts(_resp("claude-opus-5-5", u), "claude-opus-5-5")
+    assert (a.tokens.cache_write_5m, a.tokens.cache_write_1h, a.tokens.cache_read) == (10, 20, 7)
+    assert a.kind == "message" and a.billed
+
+    # fallback: declined attempt + serving attempt, each on its own model
+    it = [NS(type="message", model=None, input_tokens=100, output_tokens=0,
+             cache_creation_input_tokens=0, cache_read_input_tokens=0),
+          NS(type="fallback_message", model="claude-opus-4-8", input_tokens=100, output_tokens=50,
+             cache_creation_input_tokens=0, cache_read_input_tokens=0)]
+    u = NS(input_tokens=100, output_tokens=50, iterations=it)
+    a, b = llm.usage_attempts(_resp("claude-opus-4-8", u), "claude-opus-5-5")
+    assert (a.model, a.kind, b.model, b.kind) == ("claude-opus-5-5", "declined", "claude-opus-4-8", "message")
+
+    # refusal before output: billed only in some categories
+    u = NS(input_tokens=100, output_tokens=0)
+    [a] = llm.usage_attempts(_resp("claude-opus-5-5", u, "refusal", "cyber"), "claude-opus-5-5")
+    assert a.kind == "refused" and not a.billed and a.cost_nanos() == 0
+    [a] = llm.usage_attempts(_resp("claude-opus-5-5", u, "refusal", "bio"), "claude-opus-5-5")
+    assert a.billed and a.cost_nanos() == 400_000
+
+
+def test_pipeline_collects_usage(monkeypatch):
+    from xmender.services import pricing
+
+    attempt = llm.UsageAttempt("claude-opus-5-5", pricing.Tokens(input=1000, output=200))
+    monkeypatch.setattr(llm, "complete", lambda key, model, s, u: llm.LLMResult(
+        "FILTER MATCH", "end_turn", model, usage=(attempt,)))
+    steps = [{"type": "filter_agent", "config": {"instructions": "x", "model": None}},
+             {"type": "webhook_agent", "config": {"instructions": "y", "model": None,
+                                                  "discord_integration_id": 99}}]
+    res = pipeline.run_task(steps, make_mail(), pipeline.RunContext(api_key="k", default_model="d"))
+    # second step errors (webhook gone) before its LLM call; first step's usage is kept
+    assert res.status == "error" and res.usage == [("filter_agent", attempt)]
+    assert res.log[0]["usage"] == {"input_tokens": 1000, "output_tokens": 200, "cost_nanousd": 8_000_000}

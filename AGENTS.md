@@ -41,7 +41,7 @@ xmender/
   security.py     argon2 hashing, session tokens, Fernet encrypt()/decrypt()
   bootstrap.py    built-in `admin` account + temp password on stdout
   api/            one router per area: auth, users (admin), integrations, tasks, dashboard
-  services/       blocking domain logic: gmail, discord, llm, prompts, filters, pipeline, accounts, poller
+  services/       blocking domain logic: gmail, discord, llm, pricing, usage, prompts, filters, pipeline, accounts, poller
   web/static/     index.html, app.js, style.css, fonts, icon.svg (no build step)
 migrations/       Alembic (render_as_batch=True so ALTERs work on SQLite)
 deploy/           systemd unit template; scripts/install-service.sh fills @USER@/@GROUP@/@DIR@
@@ -135,8 +135,9 @@ To add a step type, touch all of these:
 
 Each step appends a log entry to `TaskRun.log` with these fields: `step`,
 `type`, `label`, `outcome` (`pass` | `stop` | `sent` | `error`), `detail`,
-and optionally `model`, `response` (clipped) and `warning`. The dashboard
-renders these entries as-is.
+and optionally `model`, `response` (clipped), `warning` and `usage`
+(`input_tokens`, `output_tokens`, `cost_nanousd`). The dashboard renders
+these entries as-is.
 
 ### LLM (`services/llm.py`)
 - Uses the official `anthropic` SDK (v2.x, built on `httpx2`). Always pass
@@ -153,8 +154,27 @@ renders these entries as-is.
 - No `thinking` or `temperature` parameters are sent, because users can pick
   any model (and newer models reject explicit settings).
   `max_tokens = min(16000, model.max_tokens)`.
+- `complete()` returns `LLMResult.usage`: one `UsageAttempt` per model that
+  ran. With a fallback, `usage.iterations` is the billing record and each
+  attempt bills at its own model's rates; earlier (declined) attempts are
+  counted as billed. A refusal before any output is billed only for the
+  categories in `pricing.BILLED_REFUSAL_CATEGORIES`.
 - Before changing Claude API usage, load the `claude-api` skill. SDK
   signatures, model IDs and parameters drift; verify rather than recall.
+
+### API usage and cost (`services/pricing.py`, `services/usage.py`)
+- The Models API has no prices, so `pricing._PRICES` holds the list prices
+  (USD per MTok) with `PRICES_AS_OF`. When Anthropic changes prices or ships
+  a model, update the table from the pricing page and bump the date. Model
+  IDs are matched after stripping a `-YYYYMMDD` suffix.
+- Every LLM attempt made by a task step becomes an `ApiUsage` row, written by
+  the poller next to the `TaskRun`, even when the step later fails. Cost is
+  stored at record time as integer nano-dollars (`cost_nanousd`, NULL if the
+  price is unknown), so price changes never rewrite history. Never use floats
+  for money server-side.
+- `GET /api/usage?period=&tz=&scope=` summarises by model, task and day in the
+  viewer's time zone; `scope=all` is admin-only. The Settings page shows it.
+- Any new code path that calls `llm.complete()` must record its usage too.
 
 ### Prompt-injection hardening (`services/prompts.py`)
 - Untrusted email text and the operator's instructions are each wrapped in

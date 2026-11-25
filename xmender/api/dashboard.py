@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -11,8 +13,8 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
-from ..models import Email, Integration, TaskRun, User
-from ..services import llm
+from ..models import Email, Integration, TaskRun, User, utcnow
+from ..services import llm, usage
 from ..services.accounts import anthropic_key
 from ..services.poller import poller
 from .deps import current_user, user_dict
@@ -117,3 +119,20 @@ async def put_my_settings(body: MySettings, db: Session = Depends(get_db), user:
             raise HTTPException(400, f"Model `{model}` is not offered by the provider.")
     user.default_model = model
     return {"user": user_dict(user)}
+
+
+@router.get("/usage")
+def api_usage(
+    period: Literal["today", "7d", "30d", "month", "all"] = "30d",
+    tz: str | None = Query(None, max_length=64),
+    scope: Literal["me", "all"] = "me",
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """Anthropic token usage and cost, from the usage each call reports."""
+    if scope == "all" and not user.has_admin():
+        raise HTTPException(403, "Only admins can see usage for all users.")
+    zone = usage.resolve_tz(tz)
+    since = usage.period_start(period, utcnow(), zone)
+    data = usage.summarize(db, None if scope == "all" else user.id, since=since, tz=zone)
+    return {**data, "period": period, "since": since.isoformat() if since else None, "scope": scope}

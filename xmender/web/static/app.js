@@ -95,6 +95,18 @@ function fmtTime(iso) {
   return d.toLocaleString();
 }
 
+// Costs arrive as integer nano-dollars. Under $1 show up to 6 decimals.
+function fmtUsd(nanos) {
+  if (nanos === null || nanos === undefined) return '—';
+  const usd = nanos / 1e9;
+  if (usd >= 1) return '$' + usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (nanos > 0 && usd < 0.0000005) return '< $0.000001';
+  return '$' + usd.toFixed(nanos === 0 ? 2 : 6);
+}
+function fmtRate(s) { return '$' + Number(s).toFixed(Math.max(2, (String(s).split('.')[1] || '').length)); }
+function exactUsd(nanos) { return nanos === null || nanos === undefined ? 'price unknown' : '$' + (nanos / 1e9).toFixed(9) + ' exact'; }
+function fmtNum(n) { return (n || 0).toLocaleString('en-US'); }
+
 function field(label, input, hint) {
   return h('div', { class: 'field' }, h('label', {}, label), input, hint ? h('div', { class: 'hint' }, hint) : null);
 }
@@ -313,7 +325,8 @@ function mailCard(m) {
     r.log.map((s) => [
       h('div', { class: 'step-line' }, h('span', { class: 'n' }, s.step + '.'),
         h('span', {}, s.label), h('span', { class: `chip ${OUTCOME_CHIP[s.outcome] || ''}` }, s.outcome || '?'),
-        h('span', { class: 'detail' }, s.detail || '', s.model ? ` · ${s.model}` : '', s.warning ? ` · ${s.warning}` : '')),
+        h('span', { class: 'detail' }, s.detail || '', s.model ? ` · ${s.model}` : '', s.warning ? ` · ${s.warning}` : '',
+          s.usage ? h('span', { title: exactUsd(s.usage.cost_nanousd) }, ` · ${fmtNum(s.usage.input_tokens)} in / ${fmtNum(s.usage.output_tokens)} out · ${fmtUsd(s.usage.cost_nanousd)}`) : null)),
       s.response ? h('pre', { class: 'response' }, s.response) : null,
     ]))) : h('div', { class: 'muted small' }, 'No task ran on this email.'));
   return h('div', { class: 'card mail', tabindex: '0',
@@ -682,9 +695,12 @@ async function viewSettings(main) {
     } catch (e) { toast(e.message, 'err'); }
   }) }, 'Change password');
 
+  const usageBox = h('div', {});
   page(main, 'Settings', `Signed in as ${S.me.username}.`, null,
     h('h2', {}, h('span', { class: 'dot pink' }), 'Default model'),
     h('div', { class: 'card' }, modelBox),
+    h('h2', {}, h('span', { class: 'dot lime' }), 'API usage'),
+    usageBox,
     h('h2', {}, h('span', { class: 'dot' }), 'Password'),
     h('div', { class: 'card' }, field('Current password', cur), h('div', { class: 'grid-2' }, field('New password', pw, 'At least 10 characters.'), field('Repeat', pw2)), pwBtn));
 
@@ -709,6 +725,65 @@ async function viewSettings(main) {
       h('div', { class: 'btn-row' }, save, h('button', { class: 'ghost', onclick: () => drawModels(true) }, icon(ICONS.refresh), 'Reload list')));
   }
   drawModels(false);
+  drawUsage(usageBox);
+}
+
+const USAGE_PERIODS = [['today', 'Today'], ['7d', '7 days'], ['30d', '30 days'], ['month', 'This month'], ['all', 'All time']];
+const usageView = { period: '30d', scope: 'me' };
+
+async function drawUsage(box) {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const periods = h('div', { class: 'btn-row' }, USAGE_PERIODS.map(([k, label]) => h('button', {
+    class: 'chip' + (usageView.period === k ? ' aqua' : ''),
+    onclick: () => { usageView.period = k; drawUsage(box); },
+  }, label)));
+  const scope = S.me.is_admin ? switchEl(usageView.scope === 'all', (on) => { usageView.scope = on ? 'all' : 'me'; drawUsage(box); }, 'All users') : null;
+  const body = h('div', { class: 'muted small mt' }, 'Loading usage…');
+  box.replaceChildren(h('div', { class: 'card' }, h('div', { class: 'card-head' }, periods, scope), body));
+
+  let u;
+  try { u = await api('GET', `/api/usage?period=${usageView.period}&scope=${usageView.scope}&tz=${encodeURIComponent(tz)}`); }
+  catch (e) { body.replaceChildren(h('p', { class: 'error-box mb0' }, e.message)); return; }
+
+  const t = u.total;
+  const cacheTokens = t.cache_read_tokens + t.cache_write_5m_tokens + t.cache_write_1h_tokens;
+  const stat = (label, value, sub, title) => h('div', { class: 'stat' }, h('div', { class: 'stat-label' }, label),
+    h('div', { class: 'stat-value', title: title || null }, value), sub ? h('div', { class: 'stat-sub' }, sub) : null);
+  const tiles = h('div', { class: 'stats' },
+    stat('Cost', fmtUsd(t.cost_nanousd), t.unpriced ? `+ ${t.unpriced} call${t.unpriced > 1 ? 's' : ''} without a known price` : 'USD, estimated', exactUsd(t.cost_nanousd)),
+    stat('Calls', fmtNum(t.requests), 'model attempts'),
+    stat('Input tokens', fmtNum(t.input_tokens + cacheTokens), cacheTokens ? `${fmtNum(t.cache_read_tokens)} cache read · ${fmtNum(t.cache_write_5m_tokens + t.cache_write_1h_tokens)} cache write` : 'uncached'),
+    stat('Output tokens', fmtNum(t.output_tokens)));
+
+  if (!t.requests) {
+    body.replaceChildren(tiles, h('div', { class: 'empty mt' }, 'No Anthropic calls recorded in this period. Usage is recorded from the moment this version runs; earlier calls are not included.'));
+    return;
+  }
+
+  const costCell = (r) => h('td', { class: 'num', title: exactUsd(r.cost_nanousd) + (r.unpriced ? ` + ${r.unpriced} unpriced` : '') },
+    r.unpriced && !r.cost_nanousd ? h('span', { class: 'chip pink' }, 'price unknown') : fmtUsd(r.cost_nanousd));
+  const tokenCells = (r) => [
+    h('td', { class: 'num' }, fmtNum(r.requests)),
+    h('td', { class: 'num' }, fmtNum(r.input_tokens + r.cache_read_tokens + r.cache_write_5m_tokens + r.cache_write_1h_tokens)),
+    h('td', { class: 'num' }, fmtNum(r.output_tokens)),
+    costCell(r),
+  ];
+  const table = (first, rows, extraHead, extra) => h('div', { class: 'table-wrap' }, h('table', { class: 'usage' },
+    h('thead', {}, h('tr', {}, h('th', {}, first), extraHead ? h('th', {}, extraHead) : null,
+      h('th', { class: 'num' }, 'Calls'), h('th', { class: 'num' }, 'Input'), h('th', { class: 'num' }, 'Output'), h('th', { class: 'num' }, 'Cost'))),
+    h('tbody', {}, rows.map((r) => h('tr', {}, h('td', {}, r.label), extra ? h('td', { class: 'muted' }, extra(r)) : null, tokenCells(r))))));
+
+  body.replaceChildren(tiles,
+    h('h3', { class: 'usage-h' }, 'By model'),
+    table('Model', u.models.map((r) => ({ ...r, label: r.model })), 'Rate in / out per MTok',
+      (r) => (r.rates ? `${fmtRate(r.rates.input)} / ${fmtRate(r.rates.output)}` : 'unknown')),
+    h('h3', { class: 'usage-h' }, 'By task'),
+    table('Task', u.tasks.map((r) => ({ ...r, label: r.task }))),
+    h('h3', { class: 'usage-h' }, 'By day'),
+    table('Day', u.days.map((r) => ({ ...r, label: r.day }))),
+    h('p', { class: 'hint mb0 mt' }, `Calculated from the token counts Anthropic returns with each call and list prices as of ${u.prices_as_of} (`,
+      h('a', { href: u.pricing_url, target: '_blank', rel: 'noopener noreferrer' }, 'pricing'),
+      '). Refusals that fall back to another model are counted as billed, so the total can be slightly above your invoice. Hover a cost for the exact value.'));
 }
 
 // ── Admin ───────────────────────────────────────────────────────────────────

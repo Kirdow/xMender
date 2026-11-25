@@ -1,4 +1,4 @@
-from xmender.services import discord, gmail, llm
+from xmender.services import discord, gmail, llm, pricing
 
 HOOK = "https://discord.com/api/webhooks/123456789012345678/" + "t" * 68
 
@@ -107,7 +107,11 @@ def test_poller_processes_new_mail(admin, monkeypatch):
     monkeypatch.setattr(gmail, "fetch_new", lambda acct, v, last, limit: (
         seen.append((v, last)) or gmail.FetchResult(uidvalidity=5, last_uid=last, messages=[(101, raw)])))
     monkeypatch.setattr(llm, "list_models", lambda key, refresh=False: [llm.ModelInfo("claude-opus-5-5", "Claude Opus 5.5", 128000)])
-    monkeypatch.setattr(llm, "complete", lambda key, model, s, u: llm.LLMResult("Invoice 7 for $10", "end_turn", model))
+    attempt = llm.UsageAttempt(
+        "claude-opus-5-5", pricing.Tokens(input=1234, output=56, cache_read=100)
+    )
+    monkeypatch.setattr(llm, "complete", lambda key, model, s, u: llm.LLMResult(
+        "Invoice 7 for $10", "end_turn", model, usage=(attempt,)))
     sent = []
     monkeypatch.setattr(discord, "send_embed", lambda url, **kw: sent.append(kw))
 
@@ -121,3 +125,17 @@ def test_poller_processes_new_mail(admin, monkeypatch):
 
     feed = admin.get("/api/emails").json()["emails"]
     assert feed[0]["subject"] == "Invoice 7" and feed[0]["runs"][0]["status"] == "completed"
+
+
+def test_usage_report(admin):
+    r = admin.get("/api/usage?period=today&tz=Europe/Stockholm").json()
+    # 1234 * $4 + 56 * $20 + 100 * $0.20 per MTok = $0.006076
+    assert r["total"]["requests"] == 1 and r["total"]["cost_nanousd"] == 6_076_000
+    assert r["models"][0]["model"] == "claude-opus-5-5" and r["models"][0]["rates"]["input"] == "4"
+    assert r["tasks"][0]["requests"] == 1 and len(r["days"]) == 1
+    assert admin.get("/api/usage?period=all&scope=all").json()["total"]["requests"] == 1
+    assert admin.get("/api/usage?period=bogus").status_code == 422
+
+    feed = admin.get("/api/emails").json()["emails"]
+    step = feed[0]["runs"][0]["log"][0]
+    assert step["usage"]["cost_nanousd"] == 6_076_000

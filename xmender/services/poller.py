@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from ..config import get_settings
 from ..db import session_scope
 from ..models import Email, Integration, Task, TaskRun, User, utcnow
-from . import gmail, pipeline
+from . import gmail, pipeline, usage
 from .accounts import gmail_account, run_context
 
 log = logging.getLogger(__name__)
@@ -75,6 +75,7 @@ def _process_message(integration_id: int, uidvalidity: int, uid: int, raw: bytes
         if integ is None:
             return 0
         user = db.get(User, integ.user_id)
+        user_id = integ.user_id
         row = Email(
             user_id=integ.user_id,
             integration_id=integration_id,
@@ -116,6 +117,9 @@ def _process_message(integration_id: int, uidvalidity: int, uid: int, raw: bytes
                     status=result.status,
                     log=result.log,
                 )
+            )
+            usage.record(
+                db, user_id, result.usage, task_id=task_id, task_name=name, email_id=email_id
             )
     return len(jobs)
 

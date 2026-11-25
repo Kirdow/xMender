@@ -7,9 +7,11 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -150,3 +152,37 @@ class TaskRun(Base):
     status: Mapped[str] = mapped_column(String(16))
     log: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ApiUsage(Base):
+    """One billed Anthropic model attempt. A call that fell back to another
+    model writes one row per model, since each bills at its own rates."""
+
+    __tablename__ = "api_usage"
+    __table_args__ = (Index("ix_api_usage_user_created", "user_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    model: Mapped[str] = mapped_column(String(128))
+    # message | declined (a fallback took over) | refused
+    kind: Mapped[str] = mapped_column(String(16), default="message")
+    # Step type that made the call (filter_agent, webhook_agent).
+    source: Mapped[str] = mapped_column(String(32), default="")
+    task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    task_name: Mapped[str] = mapped_column(String(128), default="")
+    email_id: Mapped[int | None] = mapped_column(
+        ForeignKey("emails.id", ondelete="SET NULL"), nullable=True
+    )
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_write_5m_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_write_1h_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    inference_geo: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    billed: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Cost in nano-dollars (1e-9 USD) at the prices in effect when recorded;
+    # NULL when the model's price was unknown.
+    cost_nanousd: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

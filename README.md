@@ -101,6 +101,17 @@ wrap the email and your instructions in per-call random tags, mark the email
 as untrusted data, and give the model no tools. Webhook posts disable all
 mentions.
 
+## API usage
+
+Settings shows Anthropic token usage and cost per model, task and day (today,
+7 days, 30 days, this month, all time; admins can switch to all users). Cost
+is computed from the token counts each API response reports and Anthropic's
+list prices, kept in `xmender/services/pricing.py` with the date they were
+checked. Costs are stored per call in nano-dollars, so small totals are exact
+to the sixth decimal. Calls on a model without a known price are counted but
+shown as "price unknown". Usage is recorded from this version on; earlier
+calls are not included.
+
 ## Development
 
 ```bash

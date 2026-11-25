@@ -239,6 +239,17 @@ table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
 th { text-align: left; color: var(--muted); font-weight: 400; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 8px; border-bottom: 1px solid var(--border); }
 td { padding: 10px 8px; border-bottom: 1px solid var(--faint); vertical-align: middle; }
 .table-wrap { overflow-x: auto; }
+th.num, td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+table.usage td { padding: 7px 8px; }
+
+/* ── Usage ── */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-top: 14px; }
+.stat { background: var(--panel-2); border: 1px solid var(--faint); border-radius: 10px; padding: 12px 14px; }
+.stat-label { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.stat-value { font-size: 1.25rem; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
+.stat:first-child .stat-value { color: var(--secondary); }
+.stat-sub { color: var(--muted); font-size: 0.7rem; margin-top: 2px; }
+.usage-h { font-size: 0.85rem; font-weight: 600; margin: 22px 0 6px; }
 
 /* ── Modal ── */
 .modal-backdrop {

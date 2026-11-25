@@ -78,23 +78,47 @@ class RunContext:
 class RunResult:
     status: str  # completed | stopped | error
     log: list[dict[str, Any]]
+    # (step type, attempt) for every model attempt, including failed steps.
+    usage: list[tuple[str, llm.UsageAttempt]] = field(default_factory=list)
 
 
 def _clip(text: str) -> str:
     return text if len(text) <= LOG_TEXT_LIMIT else text[:LOG_TEXT_LIMIT] + "…"
 
 
-def _llm(ctx: RunContext, cfg: dict[str, Any], prompt: prompts.Prompt) -> llm.LLMResult:
+def _llm(
+    ctx: RunContext, cfg: dict[str, Any], prompt: prompts.Prompt,
+    entry: dict[str, Any], usage: list[tuple[str, llm.UsageAttempt]],
+) -> llm.LLMResult:
     if not ctx.api_key:
         raise llm.LLMError("No Anthropic integration is set up.")
     model = cfg.get("model") or ctx.default_model
     if not model:
         raise llm.LLMError("No model chosen for this step and no default model in Settings.")
-    return llm.complete(ctx.api_key, model, prompt.system, prompt.user)
+    res = llm.complete(ctx.api_key, model, prompt.system, prompt.user)
+    usage.extend((entry["type"], a) for a in res.usage)
+    if res.usage:
+        costs = [a.cost_nanos() for a in res.usage]
+        entry["usage"] = {
+            "input_tokens": sum(a.tokens.prompt for a in res.usage),
+            "output_tokens": sum(a.tokens.output for a in res.usage),
+            "cost_nanousd": None if None in costs else sum(costs),
+        }
+    return res
 
 
 def run_task(steps: list[dict[str, Any]], mail: ParsedEmail, ctx: RunContext) -> RunResult:
     log: list[dict[str, Any]] = []
+    usage: list[tuple[str, llm.UsageAttempt]] = []
+    result = _run_steps(steps, mail, ctx, log, usage)
+    result.usage = usage
+    return result
+
+
+def _run_steps(
+    steps: list[dict[str, Any]], mail: ParsedEmail, ctx: RunContext,
+    log: list[dict[str, Any]], usage: list[tuple[str, llm.UsageAttempt]],
+) -> RunResult:
     for i, step in enumerate(steps, 1):
         kind, cfg = step["type"], step.get("config") or {}
         entry: dict[str, Any] = {"step": i, "type": kind, "label": STEP_TYPES.get(kind, kind)}
@@ -107,7 +131,9 @@ def run_task(steps: list[dict[str, Any]], mail: ParsedEmail, ctx: RunContext) ->
                     return RunResult("stopped", log)
 
             elif kind == "filter_agent":
-                res = _llm(ctx, cfg, prompts.filter_agent_prompt(cfg["instructions"], mail))
+                res = _llm(
+                    ctx, cfg, prompts.filter_agent_prompt(cfg["instructions"], mail), entry, usage
+                )
                 entry.update(model=res.model, response=_clip(res.text))
                 if res.stop_reason == "refusal":
                     entry.update(outcome="stop", detail="model declined to answer")
@@ -128,6 +154,8 @@ def run_task(steps: list[dict[str, Any]], mail: ParsedEmail, ctx: RunContext) ->
                     ctx,
                     cfg,
                     prompts.webhook_agent_prompt(cfg["instructions"], mail, WEBHOOK_TEXT_TARGET),
+                    entry,
+                    usage,
                 )
                 entry.update(model=res.model, response=_clip(res.text))
                 if res.stop_reason == "refusal":
