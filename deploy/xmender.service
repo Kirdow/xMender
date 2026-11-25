@@ -1,0 +1,45 @@
+# xMender systemd unit (template).
+# scripts/install-service.sh fills in @USER@, @GROUP@ and @DIR@ and installs it.
+# Manual install: replace the placeholders, copy to /etc/systemd/system/, then
+#   sudo systemctl daemon-reload && sudo systemctl enable --now xmender
+# The first-start admin password appears in: journalctl -u xmender
+
+[Unit]
+Description=xMender - AI-agent based everyday automation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=@DIR@
+ExecStart=@DIR@/.venv/bin/python -m xmender
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+# Hardening. xMender only needs to write its data directory.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@DIR@/data
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
