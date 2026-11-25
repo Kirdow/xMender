@@ -1,0 +1,123 @@
+from xmender.services import discord, gmail, llm
+
+HOOK = "https://discord.com/api/webhooks/123456789012345678/" + "t" * 68
+
+
+def test_csrf_header_required(app_client):
+    r = app_client.post("/api/auth/login", json={"username": "a", "password": "b"}, headers={"x-xmender": ""})
+    assert r.status_code == 403
+
+
+def test_setup_and_admin_rules(admin):
+    c = admin
+    st = c.get("/api/auth/state").json()
+    assert st["setup_required"] is False and st["user"]["is_root"]
+    # setup cannot be repeated
+    assert c.post("/api/auth/setup", json={"temp_password": "x", "new_password": "y" * 12}).status_code == 409
+
+    users = c.get("/api/admin/users").json()["users"]
+    root = next(u for u in users if u["is_root"])
+    assert c.delete(f"/api/admin/users/{root['id']}").status_code == 400
+    assert c.patch(f"/api/admin/users/{root['id']}", json={"is_admin": False}).status_code == 400
+
+    # registration off by default
+    assert c.get("/api/admin/settings").json()["registration_enabled"] is False
+    assert c.post("/api/auth/register", json={"username": "eve", "password": "x" * 12}).status_code == 403
+
+
+def test_user_management(admin):
+    c = admin
+    r = c.post("/api/admin/users", json={"username": "bob", "password": "bob-password-1", "permissions": ["tasks"]})
+    assert r.status_code == 200, r.text
+    bob = r.json()["user"]
+    assert bob["permissions"] == ["tasks"]
+    r = c.patch(f"/api/admin/users/{bob['id']}", json={"is_admin": True})
+    assert r.json()["user"]["is_admin"] is True
+    assert c.delete(f"/api/admin/users/{bob['id']}").status_code == 200
+
+
+def test_integrations_and_tasks(admin, monkeypatch):
+    c = admin
+    monkeypatch.setattr(gmail, "test_imap", lambda acct: (5, 100))
+    smtp_calls = []
+    monkeypatch.setattr(gmail, "test_smtp", lambda acct: smtp_calls.append(acct.email))
+    monkeypatch.setattr(llm, "list_models", lambda key, refresh=False: [llm.ModelInfo("claude-opus-5-5", "Claude Opus 5.5", 128000)])
+    sent = []
+    monkeypatch.setattr(discord, "send_embed", lambda url, **kw: sent.append(url))
+
+    r = c.post("/api/integrations/gmail", json={"name": "xMender", "email": "me+x@gmail.com", "password": "p"})
+    assert r.status_code == 400
+    r = c.post("/api/integrations/gmail", json={"name": "xMender", "email": "me@gmail.com", "password": "abcd efgh ijkl mnop"})
+    assert r.status_code == 200, r.text
+    g = r.json()["integration"]
+    assert g["smtp_enabled"] is False and not smtp_calls
+
+    r = c.patch(f"/api/integrations/gmail/{g['id']}/smtp", json={"enabled": True})
+    assert r.json()["integration"]["smtp_enabled"] is True and smtp_calls == ["me@gmail.com"]
+
+    r = c.post("/api/integrations/discord", json={"name": "Bot", "url": HOOK, "test": "skip"})
+    assert r.status_code == 200 and not sent
+    d = r.json()["integration"]
+    r = c.post("/api/integrations/discord", json={"id": d["id"], "name": "Bot2", "test": "send"})
+    assert r.status_code == 200 and len(sent) == 1
+
+    steps = [{"type": "webhook_agent", "config": {"instructions": "sum", "discord_integration_id": d["id"]}}]
+    r = c.post("/api/tasks", json={"name": "T", "gmail_integration_id": g["id"], "steps": steps})
+    assert r.status_code == 400 and "Anthropic" in r.text
+
+    assert c.post("/api/integrations/anthropic", json={"api_key": "sk-ant-test-123456"}).status_code == 200
+    r = c.post("/api/tasks", json={"name": "T", "gmail_integration_id": g["id"], "steps": steps})
+    assert r.status_code == 400 and "default model" in r.text
+    assert c.put("/api/me/settings", json={"default_model": "nope"}).status_code == 400
+    assert c.put("/api/me/settings", json={"default_model": "claude-opus-5-5"}).status_code == 200
+    r = c.post("/api/tasks", json={"name": "T", "gmail_integration_id": g["id"], "steps": steps})
+    assert r.status_code == 200, r.text
+
+    # integrations in use cannot be deleted
+    assert c.delete(f"/api/integrations/{d['id']}").status_code == 409
+    assert c.delete(f"/api/integrations/{g['id']}").status_code == 409
+
+    secrets = c.get("/api/integrations").text
+    assert "abcdefghijklmnop" not in secrets and "t" * 68 not in secrets and "sk-ant-test-123456" not in secrets
+
+
+def test_logout(admin):
+    c = admin
+    assert c.post("/api/auth/logout").status_code == 200
+    assert c.get("/api/tasks").status_code == 401
+    r = c.post("/api/auth/login", json={"username": "ADMIN", "password": "correct-horse-1"})
+    assert r.status_code == 200
+
+
+def test_poller_processes_new_mail(admin, monkeypatch):
+    from email.message import EmailMessage
+
+    from xmender.services import poller
+
+    msg = EmailMessage()
+    msg["From"] = "billing@shop.com"
+    msg["To"] = "me@gmail.com"
+    msg["Subject"] = "Invoice 7"
+    msg["Message-ID"] = "<inv7@shop.com>"
+    msg.set_content("Amount due: 10")
+    raw = msg.as_bytes()
+
+    gid = admin.get("/api/integrations").json()["gmail"][0]["id"]
+    seen = []
+    monkeypatch.setattr(gmail, "fetch_new", lambda acct, v, last, limit: (
+        seen.append((v, last)) or gmail.FetchResult(uidvalidity=5, last_uid=last, messages=[(101, raw)])))
+    monkeypatch.setattr(llm, "list_models", lambda key, refresh=False: [llm.ModelInfo("claude-opus-5-5", "Claude Opus 5.5", 128000)])
+    monkeypatch.setattr(llm, "complete", lambda key, model, s, u: llm.LLMResult("Invoice 7 for $10", "end_turn", model))
+    sent = []
+    monkeypatch.setattr(discord, "send_embed", lambda url, **kw: sent.append(kw))
+
+    s = poller.poll_integration(gid)
+    assert s["new"] == 1 and s["runs"] == 1 and seen == [(5, 100)]
+    assert sent and sent[0]["description"] == "Invoice 7 for $10"
+
+    # same UID again is ignored (already stored), cursor advanced to 101
+    s = poller.poll_integration(gid)
+    assert seen[-1] == (5, 101) and s["runs"] == 0
+
+    feed = admin.get("/api/emails").json()["emails"]
+    assert feed[0]["subject"] == "Invoice 7" and feed[0]["runs"][0]["status"] == "completed"
