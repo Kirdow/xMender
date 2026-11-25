@@ -133,3 +133,16 @@ def test_validate_steps():
         pipeline.validate_steps([{"type": "filter_agent", "config": {"instructions": "x", "model": "zzz"}}], discord_ids=set(), model_ids={"a"})
     out = pipeline.validate_steps([{"type": "filter_agent", "config": {"instructions": " x ", "model": "a"}}], discord_ids=set(), model_ids={"a"})
     assert out == [{"type": "filter_agent", "config": {"instructions": "x", "model": "a"}}]
+
+
+def test_discord_error_details_and_names():
+    import httpx
+
+    body = {"code": 50035, "message": "Invalid Form Body", "errors": {
+        "username": {"_errors": [{"code": "USERNAME_INVALID_CONTAINS", "message": "Username cannot contain \"discord\""}]},
+        "embeds": {"0": {"description": {"_errors": [{"code": "BASE_TYPE_MAX_LENGTH", "message": "Too long"}]}}}}}
+    text = discord._error_text(httpx.Response(400, json=body))
+    assert "username: Username cannot contain" in text and "embeds.0.description: Too long" in text
+    assert discord.username_problem("xMender") is None
+    assert discord.username_problem("My Discord Bot")
+    assert discord.username_problem("everyone")

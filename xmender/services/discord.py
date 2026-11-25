@@ -130,8 +130,45 @@ def _error_code(r: httpx.Response) -> int | None:
         return None
 
 
+def _flatten_errors(node, path: str = "") -> list[str]:
+    """Discord's 50035 body: {"errors": {"embeds": {"0": {"description":
+    {"_errors": [{"code": ..., "message": ...}]}}}}} -> ["embeds.0.description: ..."]."""
+    out: list[str] = []
+    if isinstance(node, dict):
+        for err in node.get("_errors", []) or []:
+            if isinstance(err, dict):
+                out.append(f"{path or 'body'}: {err.get('message') or err.get('code')}")
+        for key, child in node.items():
+            if key != "_errors":
+                out.extend(_flatten_errors(child, f"{path}.{key}" if path else str(key)))
+    return out
+
+
 def _error_text(r: httpx.Response) -> str:
     try:
-        return str(r.json().get("message", r.text))[:300]
+        data = r.json()
     except Exception:
         return r.text[:300]
+    msg = str(data.get("message", r.text))
+    details = _flatten_errors(data.get("errors") or {})
+    if details:
+        msg += " (" + "; ".join(details) + ")"
+    return msg[:600]
+
+
+# Discord refuses webhook usernames containing these (case-insensitive).
+_FORBIDDEN_NAME_PARTS = ("discord", "clyde")
+_FORBIDDEN_NAMES = ("everyone", "here")
+
+
+def username_problem(name: str) -> str | None:
+    n = name.strip().lower()
+    if not n:
+        return "Name is required."
+    if len(n) > USERNAME_LIMIT:
+        return f"Name must be at most {USERNAME_LIMIT} characters."
+    if any(p in n for p in _FORBIDDEN_NAME_PARTS):
+        return 'Discord does not allow "discord" or "clyde" in webhook names.'
+    if n in _FORBIDDEN_NAMES:
+        return f'Discord does not allow "{name.strip()}" as a webhook name.'
+    return None

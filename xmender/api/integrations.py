@@ -233,6 +233,8 @@ async def save_discord(body: DiscordBody, db: Session = Depends(get_db), user: U
         raise HTTPException(400, "Webhook URL is required.")
 
     name = body.name.strip()
+    if problem := discord.username_problem(name):
+        raise HTTPException(400, problem)
     if body.test == "send":
         try:
             await asyncio.to_thread(
