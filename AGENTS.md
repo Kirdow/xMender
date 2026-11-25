@@ -251,9 +251,9 @@ renders these entries as-is.
 - Longer bodies go on line 3 onward, in the same `type: message` form.
 - No emojis.
 - End every commit with exactly
-  `Assisted-by: Claude Opus 5.5 <noreply@anthropic.com>` (adjust the model
-  name and version to the agent actually used). Do **not** add
-  `Co-authored-by`. The user stays the author.
+  `Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>` (adjust the model
+  name and version to the agent actually used). The user stays the author;
+  never set the agent as author or committer.
 - Work happens on `master`; the remote `origin` is
   `git@github.com:Kirdow/xMender.git`.
 
