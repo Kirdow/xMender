@@ -589,3 +589,43 @@ def test_complete_structured_outputs_and_retries(monkeypatch):
     setup(llm.ModelInfo("claude-opus-5-5", "O", 1000), ["fallbacks", "output_config"])
     r = llm.complete("k", "claude-opus-5-5", "s", "u", output_schema=schema)
     assert not r.structured and len(sent) == 3 and "fallbacks" not in sent[-1] and "output_config" not in sent[-1]
+
+
+def test_classify_and_route(monkeypatch):
+    from xmender.services.steps import classify_agent as cl
+
+    answer = {"text": '{"label": "Invoice", "reason": "asks for payment"}'}
+    seen_schema = []
+
+    def fake(key, model, s, u, **kw):
+        seen_schema.append(kw.get("output_schema"))
+        return llm.LLMResult(answer["text"], "end_turn", model, structured=True)
+
+    monkeypatch.setattr(llm, "complete", fake)
+    sent = []
+    monkeypatch.setattr(discord, "send_embed", lambda url, **kw: sent.append(kw["description"]))
+    steps = _v([
+        {"type": "classify_agent", "name": "cat",
+         "config": {"labels": [{"name": " invoice "}, {"name": "Personal", "description": "from a human"}]}},
+        {"type": "template_post", "when": {"step": "cat", "field": "label", "op": "equals", "value": "invoice"},
+         "config": {"discord_integration_id": 7, "body": "Invoice: {{cat.reason}}"}},
+        {"type": "template_post", "when": {"step": "cat", "field": "label", "op": "in", "value": "personal, other"},
+         "config": {"discord_integration_id": 7, "body": "Other: {{cat.label}}"}},
+    ])
+    assert seen_schema == [] and steps[0]["config"]["labels"][0] == {"name": "invoice", "description": ""}
+    ctx = pipeline.RunContext("k", "m", discord={7: ("A", "https://a")})
+    res = pipeline.run_task(steps, make_mail(), ctx)
+    assert res.vars["cat"] == {"label": "invoice", "reason": "asks for payment"}
+    assert sent == ["Invoice: asks for payment"]
+    assert seen_schema[0]["properties"]["label"]["enum"] == ["invoice", "Personal", "other"]
+
+    # an answer outside the categories becomes "other"
+    answer["text"] = 'Sure! {"label": "spam", "reason": "x"}'
+    res = pipeline.run_task(steps, make_mail(), ctx)
+    assert res.vars["cat"]["label"] == "other" and sent[-1] == "Other: other"
+    assert "not a category" in res.log[0]["detail"]
+
+    for bad in ({"labels": []}, {"labels": [{"name": "Other"}]}, {"labels": [{"name": "a"}, {"name": "A"}]}):
+        with pytest.raises(pipeline.StepConfigError):
+            _v([{"type": "classify_agent", "config": bad}])
+    assert cl.output_schema([{"name": "x"}])["required"] == ["label", "reason"]

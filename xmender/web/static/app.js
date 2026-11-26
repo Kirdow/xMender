@@ -600,19 +600,21 @@ const STEP_DEFAULTS = {
   filter_sender: () => ({ mode: 'first_time', count: 3, days: 7 }),
   filter_phishing: () => ({ kinds: ['auth_fail', 'reply_to_mismatch', 'name_has_address'], min_signals: 1, brands: '' }),
   filter_agent: () => ({ instructions: '', model: null }),
+  classify_agent: () => ({ labels: [{ name: 'invoice', description: 'Bills and payment requests' }, { name: 'personal', description: 'Written by a real person to me' }], instructions: '', model: null }),
   extract_agent: () => ({ fields: [{ name: 'amount', type: 'number', description: 'Total amount to pay', required: false }], instructions: '', model: null }),
   webhook_agent: () => ({ instructions: '', model: null, discord_integration_id: null }),
   template_post: () => ({ discord_integration_id: null, title: 'xMender: {{email.subject | clip:200}}',
     body: '**From:** {{email.from}}\n\n{{email.snippet}}', footer: '' }),
 };
 // Default step names on add; a number is appended when taken.
-const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_sender: 'sender', filter_phishing: 'phishing', filter_agent: 'ai_filter', webhook_agent: 'notify', template_post: 'post', extract_agent: 'extract' };
+const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_sender: 'sender', filter_phishing: 'phishing', filter_agent: 'ai_filter', webhook_agent: 'notify', template_post: 'post', extract_agent: 'extract', classify_agent: 'category' };
 // Output fields per type, mirroring the server. Filters also output `matched`.
 const STEP_OUTPUTS = {
   filter_bulk: () => ['signals'],
   filter_time: () => ['local_time'],
   filter_sender: () => ['seen_count'],
   filter_phishing: () => ['signals', 'count'],
+  classify_agent: () => ['label', 'reason'],
   extract_agent: (c) => (c.fields || []).map((f) => (f.name || '').trim().toLowerCase()).filter(Boolean),
 };
 const COND_OPS = [['equals', 'equals'], ['not_equals', 'does not equal'], ['contains', 'contains'],
@@ -798,6 +800,29 @@ const STEP_FORMS = {
       modelField(c, env),
     ];
   },
+  classify_agent(c, env) {
+    if (!Array.isArray(c.labels)) c.labels = [];
+    const list = h('div', { class: 'field-rows' });
+    const draw = () => list.replaceChildren(
+      h('div', { class: 'label-row head' }, h('span', {}, 'Category'), h('span', {}, 'What belongs here'), h('span', {})),
+      ...c.labels.map((lb, i) => h('div', { class: 'label-row' },
+        h('input', { type: 'text', value: lb.name || '', maxlength: 60, placeholder: 'invoice', 'aria-label': 'Category',
+          oninput: (e) => { lb.name = e.target.value; }, onchange: env.redraw }),
+        h('input', { type: 'text', value: lb.description || '', maxlength: 300, placeholder: 'Bills and payment requests', 'aria-label': 'Description',
+          oninput: (e) => { lb.description = e.target.value; } }),
+        h('button', { type: 'button', class: 'ghost small', title: 'Remove category', 'aria-label': 'Remove category',
+          onclick: () => { c.labels.splice(i, 1); draw(); } }, '✕'))),
+      h('div', { class: 'label-row' }, h('input', { type: 'text', value: 'other', disabled: true }),
+        h('input', { type: 'text', value: 'Added automatically: nothing else fits', disabled: true }), h('span', {})));
+    draw();
+    return [
+      field('Categories', h('div', {}, list,
+        h('button', { type: 'button', class: 'small', onclick: () => { c.labels.push({ name: '', description: '' }); draw(); } }, '+ Add category')),
+        'The result is {{name.label}} and {{name.reason}}. Route mail with "Run this step: only if <name> label equals …" on later steps.'),
+      instructionsField(c, 'Optional. e.g. "Receipts for things I already paid are not invoices."', 'Optional extra guidance for the model.'),
+      modelField(c, env),
+    ];
+  },
   extract_agent(c, env) {
     if (!Array.isArray(c.fields)) c.fields = [];
     const types = [['string', 'Text'], ['number', 'Number'], ['integer', 'Whole number'], ['boolean', 'Yes / no'], ['date', 'Date']];
@@ -863,6 +888,13 @@ function whenField(step, idx, env) {
     fieldSel.value = cur.op === 'matched' || cur.op === 'not_matched' ? 'matched' : (outs.includes(cur.field) ? cur.field : outs[0] || '');
     const opSel = h('select', {});
     const val = h('input', { type: 'text', value: Array.isArray(cur.value) ? cur.value.join(', ') : (cur.value || '') });
+    const extra = [];
+    if (ref.type === 'classify_agent') {
+      const opts = [...(ref.config.labels || []).map((lb) => (lb.name || '').trim()).filter(Boolean), 'other'];
+      const dl = h('datalist', { id: `labels-${idx}` }, opts.map((o) => h('option', { value: o })));
+      val.setAttribute('list', dl.id);
+      extra.push(dl);
+    }
 
     function sync() {
       const op = opSel.value;
@@ -882,7 +914,7 @@ function whenField(step, idx, env) {
     fieldSel.addEventListener('change', drawOps);
     opSel.addEventListener('change', sync);
     val.addEventListener('input', sync);
-    box.replaceChildren(stepSel, fieldSel, opSel, val);
+    box.replaceChildren(stepSel, fieldSel, opSel, val, ...extra);
     drawOps();
   }
   stepSel.addEventListener('change', draw);

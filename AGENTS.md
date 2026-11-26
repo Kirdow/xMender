@@ -136,6 +136,7 @@ blocks deleting them).
 | `filter_phishing` | filter | `services/signals.py`: auth fail (only the topmost `Authentication-Results` from `mx.google.com` is trusted), Reply-To domain mismatch, address in display name, protected-name mismatch, free mail; `min_signals` threshold; outputs `signals`, `count` |
 | `filter_agent` | filter | LLM verdict; matches only if the reply ends with exactly `FILTER MATCH` |
 | `template_post` | action | Discord embed from `title`/`body`/`footer` templates (`services/template.py`); no LLM |
+| `classify_agent` | agent | picks one of the user's categories (enum via structured outputs) or `other`; unknown answers become `other`; outputs `label`, `reason` |
 | `extract_agent` | agent | user-defined fields (`string`/`number`/`integer`/`boolean`/`date`) as JSON; structured outputs when supported, always coerced/validated in code; missing required field = error; outputs the field names |
 | `webhook_agent` | action | LLM writes the text; posted as an embed titled `xMender Notification`, colour `0x00FFFF` |
 

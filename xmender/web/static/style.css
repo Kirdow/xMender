@@ -247,6 +247,9 @@ textarea.short { min-height: 70px; }
 .tpl-help .chip { font-family: inherit; }
 .field-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .field-row { display: grid; grid-template-columns: 1.1fr 1fr 2fr auto auto; gap: 8px; align-items: center; }
+.label-row { display: grid; grid-template-columns: 1fr 2fr auto; gap: 8px; align-items: center; }
+.label-row.head { color: var(--muted); font-size: 0.7rem; }
+.label-row input:disabled { opacity: 0.55; }
 .field-row.head { color: var(--muted); font-size: 0.7rem; }
 @media (max-width: 640px) { .field-row { grid-template-columns: 1fr 1fr; } .field-row.head { display: none; } }
 .when-row { display: flex; gap: 8px; flex-wrap: wrap; }
