@@ -47,6 +47,7 @@ const ICONS = {
   admin: ['M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z', 'M9 12l2 2 4-4'],
   logout: ['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'M16 17l5-5-5-5', 'M21 12H9'],
   refresh: ['M21 12a9 9 0 1 1-2.6-6.4', 'M21 3v6h-6'],
+  chevron: ['M6 9l6 6 6-6'],
 };
 
 async function api(method, path, body) {
@@ -354,12 +355,23 @@ function mailCard(m) {
           s.usage ? h('span', { title: exactUsd(s.usage.cost_nanousd) }, ` · ${fmtNum(s.usage.input_tokens)} in / ${fmtNum(s.usage.output_tokens)} out · ${fmtUsd(s.usage.cost_nanousd)}`) : null)),
       s.response ? h('pre', { class: 'response' }, s.response) : null,
     ]))) : h('div', { class: 'muted small' }, 'No task ran on this email.'));
+  const snippet = m.snippet ? h('div', { class: 'snippet hidden' }, m.snippet) : null;
+  const toggle = snippet ? h('button', { type: 'button', class: 'ghost small expand', title: 'Show content',
+    'aria-label': 'Show content', 'aria-expanded': 'false',
+    onclick: (e) => {
+      e.stopPropagation();
+      const open = snippet.classList.toggle('hidden') === false;
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.title = open ? 'Hide content' : 'Show content';
+      toggle.setAttribute('aria-label', toggle.title);
+    } }, icon(ICONS.chevron)) : null;
   return h('div', { class: 'card mail', tabindex: '0',
-    onclick: (e) => { if (!e.target.closest('pre')) log.classList.toggle('hidden'); },
-    onkeydown: (e) => { if (e.key === 'Enter') log.classList.toggle('hidden'); } },
-  h('div', { class: 'card-head' }, h('div', { class: 'card-title' }, m.subject || '(no subject)'), h('span', { class: 'card-sub' }, fmtTime(m.created_at))),
+    onclick: (e) => { if (!e.target.closest('pre, .snippet')) log.classList.toggle('hidden'); },
+    onkeydown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) log.classList.toggle('hidden'); } },
+  h('div', { class: 'card-head' }, h('div', { class: 'card-title' }, m.subject || '(no subject)'),
+    h('div', { class: 'mail-meta' }, h('span', { class: 'card-sub' }, fmtTime(m.created_at)), toggle)),
   h('div', { class: 'card-sub' }, m.sender),
-  m.snippet ? h('div', { class: 'snippet' }, m.snippet) : null,
+  snippet,
   h('div', { class: 'chips' }, m.runs.map((r) => h('span', { class: `chip ${STATUS_CHIP[r.status] || ''}` }, `${r.task_name}: ${r.status}`))),
   log);
 }

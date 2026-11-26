@@ -209,6 +209,12 @@ button.chip { font-weight: 400; cursor: pointer; background: transparent; }
 .mail { cursor: pointer; }
 .mail:hover { border-color: var(--border); }
 .mail .snippet { color: var(--muted); font-size: 0.78rem; margin-top: 6px; overflow-wrap: anywhere; }
+.mail .snippet { cursor: text; }
+.mail-meta { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.mail .expand { padding: 0.2rem; line-height: 0; }
+.mail .expand svg { width: 16px; height: 16px; display: block; transition: transform 0.15s; }
+.mail .expand[aria-expanded=true] svg { transform: rotate(180deg); }
+.mail .expand[aria-expanded=true] { color: var(--primary); }
 .runlog { margin-top: 12px; border-top: 1px solid var(--faint); padding-top: 10px; }
 .runlog .run { margin-bottom: 10px; }
 .runlog .run-name { font-size: 0.8rem; font-weight: 600; margin-bottom: 6px; }
