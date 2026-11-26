@@ -136,6 +136,7 @@ blocks deleting them).
 | `filter_phishing` | filter | `services/signals.py`: auth fail (only the topmost `Authentication-Results` from `mx.google.com` is trusted), Reply-To domain mismatch, address in display name, protected-name mismatch, free mail; `min_signals` threshold; outputs `signals`, `count` |
 | `filter_agent` | filter | LLM verdict; matches only if the reply ends with exactly `FILTER MATCH` |
 | `template_post` | action | Discord embed from `title`/`body`/`footer` templates (`services/template.py`); no LLM |
+| `extract_agent` | agent | user-defined fields (`string`/`number`/`integer`/`boolean`/`date`) as JSON; structured outputs when supported, always coerced/validated in code; missing required field = error; outputs the field names |
 | `webhook_agent` | action | LLM writes the text; posted as an embed titled `xMender Notification`, colour `0x00FFFF` |
 
 The engine (`pipeline.py`) owns the options every step shares. They are stored
@@ -188,8 +189,15 @@ Each step appends a log entry to `TaskRun.log` with these fields: `step`,
 - For the models in `_FALLBACK_MODELS`, `complete()` sends
   `betas=["server-side-fallback-2026-07-01"], fallbacks="default"`. It retries
   without the fallback if the API rejects that parameter.
-- A `stop_reason == "refusal"` result stops a filter and errors a webhook
-  step.
+- `ModelInfo` carries `structured_outputs`, `image_input` and `pdf_input`
+  from the Models API `capabilities` (None if unreported).
+- `complete(..., output_schema=)` sends `output_config.format` (json_schema)
+  unless the model reports no support. If the API rejects the fallback or
+  the schema, that feature is dropped once and the call retried;
+  `LLMResult.structured` says whether the schema was enforced. Callers must
+  validate the JSON either way.
+- A `stop_reason == "refusal"` result stops a filter and errors other agent
+  steps.
 - No `thinking` or `temperature` parameters are sent, because users can pick
   any model (and newer models reject explicit settings).
   `max_tokens = min(16000, model.max_tokens)`.

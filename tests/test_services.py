@@ -511,3 +511,81 @@ def test_template_post(monkeypatch):
         _v([{"type": "template_post", "config": {"discord_integration_id": 7, "body": "{{x.y}}"}}])
     with pytest.raises(pipeline.StepConfigError, match="body template is empty"):
         _v([{"type": "template_post", "config": {"discord_integration_id": 7, "body": " "}}])
+
+
+def test_extract_agent(monkeypatch):
+    from xmender.services.steps import extract_agent as ex
+
+    calls = []
+
+    def fake(key, model, s, u, **kw):
+        calls.append(kw)
+        return llm.LLMResult('Here: {"amount": "1,234.50", "due": "2026-12-01", "paid": "no", "ref": null}',
+                             "end_turn", model, structured=False)
+
+    monkeypatch.setattr(llm, "complete", fake)
+    fields = [{"name": "Amount", "type": "number", "required": True},
+              {"name": "due", "type": "date"}, {"name": "paid", "type": "boolean"},
+              {"name": "ref", "type": "string", "description": "order ref"}]
+    steps = _v([{"type": "extract_agent", "name": "inv", "config": {"fields": fields}},
+                {"type": "filter_builtin", "when": {"step": "inv", "field": "paid", "op": "equals", "value": "false"},
+                 "config": {"subject": "invoice"}}])
+    assert steps[0]["config"]["fields"][0] == {"name": "amount", "type": "number", "description": "", "required": True}
+    res = pipeline.run_task(steps, make_mail(), pipeline.RunContext("k", "m"))
+    assert res.status == "completed", res.log
+    assert res.vars["inv"] == {"amount": 1234.5, "due": "2026-12-01", "paid": False, "ref": None}
+    schema = calls[0]["output_schema"]
+    assert schema["required"] == ["amount", "due", "paid", "ref"] and schema["additionalProperties"] is False
+    assert schema["properties"]["due"]["anyOf"][0] == {"type": "string", "format": "date"}
+    assert "validated here" in res.log[0]["detail"]
+
+    monkeypatch.setattr(llm, "complete", lambda *a, **kw: llm.LLMResult('{"amount": null}', "end_turn", "m"))
+    res = pipeline.run_task(steps, make_mail(), pipeline.RunContext("k", "m"))
+    assert res.status == "error" and "Required field(s) not found: amount" in res.log[0]["detail"]
+
+    assert ex.coerce("integer", "12.5") is None and ex.coerce("integer", 3.0) == 3
+    assert ex.coerce("date", "soon") is None and ex.coerce("boolean", "Yes") is True
+    for bad in ({"fields": []}, {"fields": [{"name": "1a"}]}, {"fields": [{"name": "a"}, {"name": "A"}]},
+                {"fields": [{"name": "matched"}]}):
+        with pytest.raises(pipeline.StepConfigError):
+            _v([{"type": "extract_agent", "config": bad}])
+
+
+def test_complete_structured_outputs_and_retries(monkeypatch):
+    import anthropic
+    import httpx
+    from types import SimpleNamespace as NS
+
+    sent = []
+
+    def make_create(reject):
+        def create(**kw):
+            sent.append(kw)
+            for word in reject:
+                if word in kw or (word == "output_config" and "output_config" in kw):
+                    raise anthropic.BadRequestError(
+                        f"{word}: not supported", response=httpx.Response(400, request=httpx.Request("POST", "http://x")), body=None)
+            return NS(content=[NS(type="text", text="{}")], stop_reason="end_turn", model=kw["model"],
+                      usage=NS(input_tokens=1, output_tokens=1))
+        return create
+
+    def setup(model_info, reject):
+        sent.clear()
+        monkeypatch.setattr(llm, "find_model", lambda key, m: model_info)
+        client = NS(messages=NS(create=make_create(reject)), beta=NS(messages=NS(create=make_create(reject))))
+        monkeypatch.setattr(llm, "_client", lambda key: client)
+
+    schema = {"type": "object"}
+    setup(llm.ModelInfo("claude-haiku-5-5", "H", 1000, structured_outputs=True), [])
+    r = llm.complete("k", "claude-haiku-5-5", "s", "u", output_schema=schema)
+    assert r.structured and sent[0]["output_config"] == {"format": {"type": "json_schema", "schema": schema}}
+
+    # model reports no support: never sent
+    setup(llm.ModelInfo("claude-haiku-5-5", "H", 1000, structured_outputs=False), [])
+    assert not llm.complete("k", "claude-haiku-5-5", "s", "u", output_schema=schema).structured
+    assert "output_config" not in sent[0]
+
+    # API rejects both features on a fallback model: each is dropped once
+    setup(llm.ModelInfo("claude-opus-5-5", "O", 1000), ["fallbacks", "output_config"])
+    r = llm.complete("k", "claude-opus-5-5", "s", "u", output_schema=schema)
+    assert not r.structured and len(sent) == 3 and "fallbacks" not in sent[-1] and "output_config" not in sent[-1]

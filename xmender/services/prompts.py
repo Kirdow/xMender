@@ -119,3 +119,34 @@ OUTPUT FORMAT:
 
 def is_filter_match(response: str) -> bool:
     return response.rstrip().endswith(FILTER_MATCH)
+
+
+def extract_agent_prompt(instructions: str, fields: list[dict], mail: ParsedEmail) -> Prompt:
+    n = secrets.token_hex(8)
+    lines = "\n".join(
+        f"- {f['name']} ({f['type']}{', required' if f.get('required') else ''})"
+        + (f": {_clean(f['description'], n)}" if f.get("description") else "")
+        for f in fields
+    )
+    extra = (
+        f"\nOPERATOR'S EXTRA GUIDANCE:\n{_instructions_block(instructions, n)}\n" if instructions else ""
+    )
+    system = f"""You are the "Extract (Agent)" step in xMender, an automated email-processing pipeline.
+
+PURPOSE: Read the email below and extract the fields the operator defined, as one JSON object. Later steps use these values.
+
+{_security_rules(n)}
+
+FIELDS TO EXTRACT (key, type, meaning):
+{lines}
+{extra}
+EMAIL:
+{_email_block(mail, n)}
+
+OUTPUT FORMAT:
+- Output only one JSON object with exactly these keys: {", ".join(f["name"] for f in fields)}. No prose, no code fences.
+- Use null when the email does not contain a value. Never guess or invent values.
+- number/integer: digits only, no currency symbols or thousands separators. date: YYYY-MM-DD. boolean: true or false.
+- Copy text values faithfully and keep them short; do not add commentary."""
+    user = "Extract the fields from the email in the system prompt as the required JSON object."
+    return Prompt(system=system, user=user)

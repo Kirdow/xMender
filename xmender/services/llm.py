@@ -42,6 +42,10 @@ class ModelInfo:
     id: str
     display_name: str
     max_tokens: int | None
+    # From the Models API `capabilities`; None when not reported.
+    structured_outputs: bool | None = None
+    image_input: bool | None = None
+    pdf_input: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,8 @@ class LLMResult:
     stop_reason: str | None
     model: str
     usage: tuple[UsageAttempt, ...] = ()
+    # True when the API enforced `output_schema` (structured outputs).
+    structured: bool = False
 
 
 _cache: dict[str, tuple[float, list[ModelInfo]]] = {}
@@ -110,6 +116,9 @@ def list_models(api_key: str, *, refresh: bool = False) -> list[ModelInfo]:
                 id=m.id,
                 display_name=getattr(m, "display_name", None) or m.id,
                 max_tokens=getattr(m, "max_tokens", None),
+                structured_outputs=_supports(m, "structured_outputs"),
+                image_input=_supports(m, "image_input"),
+                pdf_input=_supports(m, "pdf_input"),
             )
             for m in _client(api_key).models.list(limit=100)
         ]
@@ -127,35 +136,67 @@ def list_models(api_key: str, *, refresh: bool = False) -> list[ModelInfo]:
     return models
 
 
+def _supports(m: object, name: str) -> bool | None:
+    cap = getattr(getattr(m, "capabilities", None), name, None)
+    supported = getattr(cap, "supported", None)
+    return supported if isinstance(supported, bool) else None
+
+
 def find_model(api_key: str, model_id: str) -> ModelInfo | None:
     return next((m for m in list_models(api_key) if m.id == model_id), None)
 
 
-def complete(api_key: str, model: str, system: str, user: str) -> LLMResult:
+def complete(
+    api_key: str,
+    model: str,
+    system: str,
+    user: str | list[dict],
+    *,
+    output_schema: dict | None = None,
+) -> LLMResult:
+    """One Messages call. `user` is text or a list of content blocks.
+
+    With `output_schema`, structured outputs are requested when the model
+    supports them; otherwise (or if the API rejects them) the call goes ahead
+    without, and the caller must validate the JSON itself. `LLMResult.structured`
+    says which happened."""
     info = find_model(api_key, model)
     if info is None:
         raise LLMError(f"Model `{model}` is not offered by the provider for this API key.")
     max_tokens = min(DEFAULT_MAX_TOKENS, info.max_tokens or DEFAULT_MAX_TOKENS)
 
     client = _client(api_key)
-    kwargs = dict(
+    kwargs: dict = dict(
         model=model,
         max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user}],
     )
+    use_fallback = model in _FALLBACK_MODELS
+    use_schema = output_schema is not None and info.structured_outputs is not False
     try:
-        if model in _FALLBACK_MODELS:
+        # Each optional feature is dropped once if the API rejects it.
+        while True:
+            call = dict(kwargs)
+            if use_schema:
+                call["output_config"] = {"format": {"type": "json_schema", "schema": output_schema}}
             try:
-                resp = client.beta.messages.create(
-                    **kwargs, betas=[_FALLBACK_BETA], fallbacks="default"
-                )
+                if use_fallback:
+                    resp = client.beta.messages.create(
+                        **call, betas=[_FALLBACK_BETA], fallbacks="default"
+                    )
+                else:
+                    resp = client.messages.create(**call)
+                break
             except anthropic.BadRequestError as e:
-                if "fallback" not in str(e).lower():
+                msg = str(e).lower()
+                if use_fallback and "fallback" in msg:
+                    use_fallback = False
+                elif use_schema and ("output_config" in msg or "output_format" in msg
+                                     or "structured" in msg or "schema" in msg):
+                    use_schema = False
+                else:
                     raise
-                resp = client.messages.create(**kwargs)
-        else:
-            resp = client.messages.create(**kwargs)
     except anthropic.AuthenticationError as e:
         raise LLMError("Anthropic rejected the API key.") from e
     except anthropic.NotFoundError as e:
@@ -171,7 +212,8 @@ def complete(api_key: str, model: str, system: str, user: str) -> LLMResult:
 
     text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
     return LLMResult(
-        text=text, stop_reason=resp.stop_reason, model=resp.model, usage=usage_attempts(resp, model)
+        text=text, stop_reason=resp.stop_reason, model=resp.model,
+        usage=usage_attempts(resp, model), structured=use_schema,
     )
 
 

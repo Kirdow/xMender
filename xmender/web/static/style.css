@@ -245,6 +245,10 @@ textarea.short { min-height: 70px; }
 .tpl-help { margin: 2px 0 10px; }
 .tpl-help summary { cursor: pointer; font-size: 0.75rem; color: var(--muted); }
 .tpl-help .chip { font-family: inherit; }
+.field-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.field-row { display: grid; grid-template-columns: 1.1fr 1fr 2fr auto auto; gap: 8px; align-items: center; }
+.field-row.head { color: var(--muted); font-size: 0.7rem; }
+@media (max-width: 640px) { .field-row { grid-template-columns: 1fr 1fr; } .field-row.head { display: none; } }
 .when-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .when-row select, .when-row input { width: auto; flex: 1 1 140px; }
 .step-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 8px; }

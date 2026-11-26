@@ -600,18 +600,20 @@ const STEP_DEFAULTS = {
   filter_sender: () => ({ mode: 'first_time', count: 3, days: 7 }),
   filter_phishing: () => ({ kinds: ['auth_fail', 'reply_to_mismatch', 'name_has_address'], min_signals: 1, brands: '' }),
   filter_agent: () => ({ instructions: '', model: null }),
+  extract_agent: () => ({ fields: [{ name: 'amount', type: 'number', description: 'Total amount to pay', required: false }], instructions: '', model: null }),
   webhook_agent: () => ({ instructions: '', model: null, discord_integration_id: null }),
   template_post: () => ({ discord_integration_id: null, title: 'xMender: {{email.subject | clip:200}}',
     body: '**From:** {{email.from}}\n\n{{email.snippet}}', footer: '' }),
 };
 // Default step names on add; a number is appended when taken.
-const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_sender: 'sender', filter_phishing: 'phishing', filter_agent: 'ai_filter', webhook_agent: 'notify', template_post: 'post' };
+const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_sender: 'sender', filter_phishing: 'phishing', filter_agent: 'ai_filter', webhook_agent: 'notify', template_post: 'post', extract_agent: 'extract' };
 // Output fields per type, mirroring the server. Filters also output `matched`.
 const STEP_OUTPUTS = {
   filter_bulk: () => ['signals'],
   filter_time: () => ['local_time'],
   filter_sender: () => ['seen_count'],
   filter_phishing: () => ['signals', 'count'],
+  extract_agent: (c) => (c.fields || []).map((f) => (f.name || '').trim().toLowerCase()).filter(Boolean),
 };
 const COND_OPS = [['equals', 'equals'], ['not_equals', 'does not equal'], ['contains', 'contains'],
   ['in', 'is one of'], ['not_in', 'is not one of'], ['is_set', 'is set'], ['is_empty', 'is empty']];
@@ -793,6 +795,31 @@ const STEP_FORMS = {
     return [
       instructionsField(c, 'Describe which emails should pass. e.g. "Emails from a real person asking me something that needs a reply."',
         'The model sees the email and these instructions; the email passes only if its reply ends with FILTER MATCH.'),
+      modelField(c, env),
+    ];
+  },
+  extract_agent(c, env) {
+    if (!Array.isArray(c.fields)) c.fields = [];
+    const types = [['string', 'Text'], ['number', 'Number'], ['integer', 'Whole number'], ['boolean', 'Yes / no'], ['date', 'Date']];
+    const list = h('div', { class: 'field-rows' });
+    const draw = () => list.replaceChildren(
+      h('div', { class: 'field-row head' }, h('span', {}, 'Key'), h('span', {}, 'Type'), h('span', {}, 'What it is'), h('span', {}, 'Required'), h('span', {})),
+      ...c.fields.map((f, i) => h('div', { class: 'field-row' },
+        h('input', { type: 'text', value: f.name || '', maxlength: 32, placeholder: 'amount', 'aria-label': 'Key', spellcheck: 'false',
+          oninput: (e) => { f.name = e.target.value; }, onchange: env.redraw }),
+        choice(types, f.type || 'string', (v) => { f.type = v; }),
+        h('input', { type: 'text', value: f.description || '', maxlength: 300, placeholder: 'Total amount to pay', 'aria-label': 'Description',
+          oninput: (e) => { f.description = e.target.value; } }),
+        h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!f.required, 'aria-label': 'Required',
+          onchange: (e) => { f.required = e.target.checked; } })),
+        h('button', { type: 'button', class: 'ghost small', title: 'Remove field', 'aria-label': 'Remove field',
+          onclick: () => { c.fields.splice(i, 1); draw(); } }, '✕'))));
+    draw();
+    return [
+      field('Fields', h('div', {}, list,
+        h('button', { type: 'button', class: 'small', onclick: () => { c.fields.push({ name: '', type: 'string', description: '', required: false }); draw(); } }, '+ Add field')),
+        'Later steps use them as {{name.key}}. Missing values are empty; a missing required value fails the step.'),
+      instructionsField(c, 'Optional. e.g. "Amounts are in SEK. The due date may be written as a weekday."', 'Optional extra guidance for the model.'),
       modelField(c, env),
     ];
   },
