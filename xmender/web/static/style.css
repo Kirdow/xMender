@@ -224,9 +224,16 @@ pre.response {
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
   padding: 14px 16px; margin-bottom: 10px; position: relative;
 }
-.step[data-type=filter_builtin] { border-left: 3px solid var(--primary); }
-.step[data-type=filter_agent] { border-left: 3px solid var(--secondary); }
-.step[data-type=webhook_agent] { border-left: 3px solid var(--ternary); }
+.step[data-group=filter] { border-left: 3px solid var(--primary); }
+.step[data-group=agent] { border-left: 3px solid var(--secondary); }
+.step[data-group=action] { border-left: 3px solid var(--ternary); }
+.step-head .title .step-name { margin-left: 8px; font-weight: 400; }
+.step-opts { margin-top: 10px; border-top: 1px solid var(--faint); padding-top: 8px; }
+.step-opts summary { cursor: pointer; font-size: 0.78rem; color: var(--fg); user-select: none; }
+.step-opts summary .muted { font-size: 0.72rem; }
+.step-opts[open] summary { margin-bottom: 10px; }
+.when-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.when-row select, .when-row input { width: auto; flex: 1 1 140px; }
 .step-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 8px; }
 .step-head .title { font-weight: 600; font-size: 0.85rem; }
 .step-head .title .n { color: var(--muted); margin-right: 6px; }

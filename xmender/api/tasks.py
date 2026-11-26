@@ -48,7 +48,7 @@ def meta(db: Session = Depends(get_db), user: User = Depends(require("tasks"))):
             {"id": r.id, "name": r.name, **({"email": r.config.get("email")} if r.kind == "gmail" else {})}
         )
     return {
-        "step_types": [{"type": k, "label": v} for k, v in pipeline.STEP_TYPES.items()],
+        "step_types": pipeline.step_types_meta(),
         "gmail": gm,
         "discord": dc,
         "has_anthropic": anthropic_key(db, user.id) is not None,
@@ -77,10 +77,10 @@ async def _validated(db: Session, user: User, body: TaskBody) -> list[dict[str, 
         steps = pipeline.validate_steps(body.steps, discord_ids=discord_ids(db, user.id), model_ids=model_ids)
     except pipeline.StepConfigError as e:
         raise HTTPException(400, str(e)) from e
-    uses_llm = any(s["type"] != "filter_builtin" for s in steps)
-    if uses_llm and not key:
+    agent_steps = pipeline.llm_steps(steps)
+    if agent_steps and not key:
         raise HTTPException(400, "Agent steps need the Anthropic integration set up first.")
-    if uses_llm and not user.default_model and any(not s["config"].get("model") for s in steps if s["type"] != "filter_builtin"):
+    if not user.default_model and any(not s["config"].get("model") for s in agent_steps):
         raise HTTPException(400, "Pick a model for each agent step, or set a default model in Settings.")
     return steps
 

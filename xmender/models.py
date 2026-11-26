@@ -148,7 +148,8 @@ class TaskRun(Base):
     )
     email_id: Mapped[int] = mapped_column(ForeignKey("emails.id", ondelete="CASCADE"), index=True)
     task_name: Mapped[str] = mapped_column(String(128))
-    # completed: every step ran; stopped: a filter ended the chain; error.
+    # completed: every step ran; partial: ran to the end past a step error;
+    # stopped: a filter ended the chain; error.
     status: Mapped[str] = mapped_column(String(16))
     log: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

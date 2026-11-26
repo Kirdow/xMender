@@ -113,31 +113,55 @@ Rules:
   pattern: read what you need in one `session_scope()`, do the slow I/O, then
   write in a new `session_scope()`.
 
-### Tasks and steps (`services/pipeline.py`)
-A `Task` belongs to one Gmail integration and stores `steps` as JSON:
-`[{"type": ..., "config": {...}}]`.
+### Tasks and steps (`services/pipeline.py`, `services/steps/`)
+A `Task` belongs to one Gmail integration and stores `steps` as a flat JSON
+list: `[{"type": ..., "config": {...}, ...options}]`.
 
-| type | behaviour |
-|---|---|
-| `filter_builtin` | `services/filters.py`, Gmail-like fields; no match stops the chain |
-| `filter_agent` | LLM verdict; passes only if the reply ends with exactly `FILTER MATCH` |
-| `webhook_agent` | LLM writes the text; posted as an embed titled `xMender Notification`, colour `0x00FFFF` |
+Each step type is a `StepDef` in its own module under `services/steps/`,
+registered in `steps/__init__.py` (`REGISTRY`, step-picker order). `StepDef`
+holds `label`, `group` (`filter` | `agent` | `action`), `uses_llm`,
+`validate(cfg, vctx)`, `run(cfg, mail, ctx, state, entry)`, `outputs(cfg)`
+(fields a named step exposes) and `refs(cfg)` (integration ids it uses;
+blocks deleting them).
 
-To add a step type, touch all of these:
-- `STEP_TYPES`
-- `validate_steps()`: normalise and validate the config; it runs at save time
-  with the live model list when available.
-- `run_task()`
-- a prompt builder in `services/prompts.py` if it uses the LLM
-- in `app.js`: `STEP_DEFAULTS`, the `stepForm()` branch, and the chip colour
-  map in `viewTasks`
-- the step border colour in `style.css` (`.step[data-type=...]`)
+| type | group | behaviour |
+|---|---|---|
+| `filter_builtin` | filter | `services/filters.py`, Gmail-like fields |
+| `filter_agent` | filter | LLM verdict; matches only if the reply ends with exactly `FILTER MATCH` |
+| `webhook_agent` | action | LLM writes the text; posted as an embed titled `xMender Notification`, colour `0x00FFFF` |
+
+The engine (`pipeline.py`) owns the options every step shares. They are stored
+only when not the default:
+- `name`: `[a-z][a-z0-9_]{0,31}`, unique, not `email`. A named step's outputs
+  land in `RunState.vars[name]` for later conditions and templates.
+- `when`: `{step, field, op, value}`; run only if it holds, else outcome
+  `skip`. Ops: `equals`, `not_equals`, `contains`, `in`, `not_in`, `is_set`,
+  `is_empty`, and `matched` / `not_matched` (filters only, no `field`). It may
+  only refer to earlier named steps.
+- `on_error`: `continue` keeps going; the run ends `partial`.
+- Filters only: `negate`, and `on_no_match: continue` (outcome `no-match`,
+  `matched=false` recorded) instead of stopping. Every filter outputs
+  `matched`.
+
+Run status: `completed`, `partial` (an error was continued past), `stopped`
+(a filter ended the chain) or `error`.
+
+To add a step type:
+- a module in `services/steps/` with its `StepDef`, added to `REGISTRY`.
+  `validate` raises `StepConfigError` without the "Step N:" prefix; the engine
+  adds it. `run` raises a domain error (`StepError`, `LLMError`, ...) on
+  failure; filters return `Result(matched=...)`, others
+  `Result(outcome="pass" | "sent", vars=...)`.
+- a prompt builder in `services/prompts.py` if it uses the LLM (call it via
+  `steps.base.call_llm`, which records usage).
+- in `app.js`: `STEP_DEFAULTS`, `STEP_FORMS`, `STEP_NAME_BASE`, and
+  `STEP_OUTPUTS` if it has outputs. Colours follow the group automatically.
 
 Each step appends a log entry to `TaskRun.log` with these fields: `step`,
-`type`, `label`, `outcome` (`pass` | `stop` | `sent` | `error`), `detail`,
-and optionally `model`, `response` (clipped), `warning` and `usage`
-(`input_tokens`, `output_tokens`, `cost_nanousd`). The dashboard renders
-these entries as-is.
+`type`, `label`, optionally `name`, `outcome` (`pass` | `no-match` | `stop` |
+`skip` | `sent` | `error`), `detail`, and optionally `model`, `response`
+(clipped), `warning` and `usage` (`input_tokens`, `output_tokens`,
+`cost_nanousd`). The dashboard renders these entries as-is.
 
 ### LLM (`services/llm.py`)
 - Uses the official `anthropic` SDK (v2.x, built on `httpx2`). Always pass

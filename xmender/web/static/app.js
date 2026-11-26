@@ -279,8 +279,8 @@ function renderRegister() {
 
 // ── Dashboard ───────────────────────────────────────────────────────────────
 
-const STATUS_CHIP = { completed: 'lime', stopped: '', error: 'red' };
-const OUTCOME_CHIP = { pass: 'aqua', stop: '', sent: 'lime', error: 'red' };
+const STATUS_CHIP = { completed: 'lime', partial: 'pink', stopped: '', error: 'red' };
+const OUTCOME_CHIP = { pass: 'aqua', 'no-match': 'pink', stop: '', skip: '', sent: 'lime', error: 'red' };
 
 async function viewDashboard(main) {
   const refreshBtn = h('button', { class: 'secondary', onclick: () => withBusy(refreshBtn, refresh) }, icon(ICONS.refresh), 'Refresh now');
@@ -542,6 +542,7 @@ async function viewTasks(main, rest) {
   try { [data, meta] = await Promise.all([api('GET', '/api/tasks'), api('GET', '/api/tasks/meta')]); } catch (e) { toast(e.message, 'err'); return; }
   const inbox = Object.fromEntries(meta.gmail.map((g) => [g.id, g]));
   const label = Object.fromEntries(meta.step_types.map((s) => [s.type, s.label]));
+  const group = Object.fromEntries(meta.step_types.map((s) => [s.type, s.group]));
   const newBtn = h('button', { class: 'primary', onclick: () => { location.hash = '#/tasks/new'; } }, '+ New task');
   if (!meta.gmail.length) newBtn.disabled = true;
 
@@ -563,15 +564,180 @@ async function viewTasks(main, rest) {
             if (!(await confirmDialog('Delete task', `Delete "${t.name}"? Past activity stays visible.`, 'Delete', true))) return;
             try { await api('DELETE', `/api/tasks/${t.id}`); toast('Task deleted.', 'ok'); viewTasks(main, []); } catch (e) { toast(e.message, 'err'); }
           } }, 'Delete'))),
-      h('div', { class: 'chips' }, t.steps.map((s, i) => h('span', { class: 'chip ' + ({ filter_builtin: 'aqua', filter_agent: 'lime', webhook_agent: 'pink' }[s.type] || '') }, `${i + 1}. ${label[s.type] || s.type}`)))))
+      h('div', { class: 'chips' }, t.steps.map((s, i) => h('span', { class: 'chip ' + (GROUP_CHIP[group[s.type]] || '') }, `${i + 1}. ${label[s.type] || s.type}`)))))
       : h('div', { class: 'empty' }, 'No tasks yet.'));
 }
 
+const GROUP_CHIP = { filter: 'aqua', agent: 'lime', action: 'pink' };
 const STEP_DEFAULTS = {
   filter_builtin: () => ({ from: '', to: '', subject: '', has_words: '', not_words: '', has_attachment: null }),
   filter_agent: () => ({ instructions: '', model: null }),
   webhook_agent: () => ({ instructions: '', model: null, discord_integration_id: null }),
 };
+// Default step names on add; a number is appended when taken.
+const STEP_NAME_BASE = { filter_builtin: 'filter', filter_agent: 'ai_filter', webhook_agent: 'notify' };
+// Output fields per type, mirroring the server. Filters also output `matched`.
+const STEP_OUTPUTS = {};
+const COND_OPS = [['equals', 'equals'], ['not_equals', 'does not equal'], ['contains', 'contains'],
+  ['in', 'is one of'], ['not_in', 'is not one of'], ['is_set', 'is set'], ['is_empty', 'is empty']];
+const VALUE_OPS = ['equals', 'not_equals', 'contains', 'in', 'not_in'];
+
+function stepOutputs(step, env) {
+  const out = STEP_OUTPUTS[step.type] ? STEP_OUTPUTS[step.type](step.config || {}) : [];
+  return env.groupOf[step.type] === 'filter' ? ['matched', ...out] : out;
+}
+
+function bindIn(c, key, el, conv) {
+  el.addEventListener('input', () => { c[key] = conv ? conv(el.value) : el.value; });
+  return el;
+}
+
+function choice(options, value, onchange) {
+  const sel = h('select', {}, options.map(([v, l]) => h('option', { value: v }, l)));
+  sel.value = value;
+  sel.addEventListener('change', () => onchange(sel.value));
+  return sel;
+}
+
+function discordSelect(c, env) {
+  const dsel = h('select', {}, h('option', { value: '' }, env.meta.discord.length ? 'Pick a webhook…' : 'No Discord webhook connected'),
+    env.meta.discord.map((d) => h('option', { value: d.id }, d.name)));
+  dsel.value = c.discord_integration_id || '';
+  dsel.addEventListener('change', () => { c.discord_integration_id = dsel.value ? Number(dsel.value) : null; });
+  return field('Discord webhook', dsel);
+}
+
+function modelField(c, env) {
+  const mdl = modelSelect(env.models.models, c.model, env.defaultLabel);
+  mdl.addEventListener('change', () => { c.model = mdl.value || null; });
+  return field('Model', mdl, env.models.error ? env.models.error : 'Models are listed live from the provider.');
+}
+
+function instructionsField(c, placeholder, hint) {
+  const ins = bindIn(c, 'instructions', h('textarea', { placeholder }));
+  ins.value = c.instructions || '';
+  return field('Instructions', ins, hint);
+}
+
+const STEP_FORMS = {
+  filter_builtin(c) {
+    const att = h('select', {}, h('option', { value: '' }, 'Either'), h('option', { value: 'yes' }, 'Has attachment'), h('option', { value: 'no' }, 'No attachment'));
+    att.value = c.has_attachment === true ? 'yes' : c.has_attachment === false ? 'no' : '';
+    att.addEventListener('change', () => { c.has_attachment = att.value === 'yes' ? true : att.value === 'no' ? false : null; });
+    return [
+      h('div', { class: 'grid-2' },
+        field('From', bindIn(c, 'from', h('input', { type: 'text', value: c.from || '', placeholder: 'billing@, shop.com' }))),
+        field('To', bindIn(c, 'to', h('input', { type: 'text', value: c.to || '' })))),
+      field('Subject', bindIn(c, 'subject', h('input', { type: 'text', value: c.subject || '', placeholder: 'invoice OR receipt' }))),
+      h('div', { class: 'grid-2' },
+        field('Has the words', bindIn(c, 'has_words', h('input', { type: 'text', value: c.has_words || '', placeholder: 'order "shipped"' }))),
+        field("Doesn't have", bindIn(c, 'not_words', h('input', { type: 'text', value: c.not_words || '' })))),
+      field('Attachment', att),
+      h('div', { class: 'hint' }, 'Case-insensitive. From/To/Subject: any of several values separated by "," or " OR ". Words: all must appear; use "quotes" for phrases.'),
+    ];
+  },
+  filter_agent(c, env) {
+    return [
+      instructionsField(c, 'Describe which emails should pass. e.g. "Emails from a real person asking me something that needs a reply."',
+        'The model sees the email and these instructions; the email passes only if its reply ends with FILTER MATCH.'),
+      modelField(c, env),
+    ];
+  },
+  webhook_agent(c, env) {
+    return [
+      discordSelect(c, env),
+      instructionsField(c, 'Describe the notification. e.g. "Summarise in 2 bullet points and list any due dates."',
+        'The model\'s reply is posted as an aqua embed titled "xMender Notification".'),
+      modelField(c, env),
+    ];
+  },
+};
+
+// "Run this step" condition on an earlier named step's output.
+function whenField(step, idx, env) {
+  const prior = env.task.steps.slice(0, idx).filter((s) => s.name);
+  const box = h('div', { class: 'when-row' });
+  const stepSel = h('select', {}, h('option', { value: '' }, 'Always'),
+    prior.map((s) => h('option', { value: s.name }, `Only if ${s.name}…`)));
+  stepSel.value = step.when && prior.some((s) => s.name === step.when.step) ? step.when.step : '';
+
+  function draw() {
+    const ref = prior.find((s) => s.name === stepSel.value);
+    if (!ref) {
+      step.when = null;
+      box.replaceChildren(stepSel);
+      return;
+    }
+    const cur = step.when && step.when.step === ref.name ? step.when : {};
+    const outs = stepOutputs(ref, env);
+    const fieldSel = h('select', {}, outs.map((o) => h('option', { value: o }, o === 'matched' ? 'match result' : o)));
+    fieldSel.value = cur.op === 'matched' || cur.op === 'not_matched' ? 'matched' : (outs.includes(cur.field) ? cur.field : outs[0] || '');
+    const opSel = h('select', {});
+    const val = h('input', { type: 'text', value: Array.isArray(cur.value) ? cur.value.join(', ') : (cur.value || '') });
+
+    function sync() {
+      const op = opSel.value;
+      const needsValue = VALUE_OPS.includes(op);
+      val.classList.toggle('hidden', !needsValue);
+      val.placeholder = op === 'in' || op === 'not_in' ? 'a, b, c' : 'value';
+      step.when = { step: ref.name, op };
+      if (fieldSel.value !== 'matched') step.when.field = fieldSel.value;
+      if (needsValue) step.when.value = val.value;
+    }
+    function drawOps() {
+      const ops = fieldSel.value === 'matched' ? [['matched', 'matched'], ['not_matched', 'did not match']] : COND_OPS;
+      opSel.replaceChildren(...ops.map(([v, l]) => h('option', { value: v }, l)));
+      opSel.value = ops.some(([v]) => v === cur.op) ? cur.op : ops[0][0];
+      sync();
+    }
+    fieldSel.addEventListener('change', drawOps);
+    opSel.addEventListener('change', sync);
+    val.addEventListener('input', sync);
+    box.replaceChildren(stepSel, fieldSel, opSel, val);
+    drawOps();
+  }
+  stepSel.addEventListener('change', draw);
+  draw();
+  return field('Run this step', box, prior.length ? null : 'Name an earlier step to run this one only in some cases.');
+}
+
+function stepOptions(step, idx, env) {
+  const isFilter = env.groupOf[step.type] === 'filter';
+  let before = step.name || '';
+  const name = h('input', { type: 'text', value: step.name || '', maxlength: 32, placeholder: 'e.g. invoice', spellcheck: 'false' });
+  name.addEventListener('input', () => { step.name = name.value.trim().toLowerCase(); });
+  name.addEventListener('change', () => {
+    // Keep later conditions pointing at this step after a rename.
+    if (before && step.name) {
+      for (const s of env.task.steps.slice(idx + 1)) if (s.when && s.when.step === before) s.when.step = step.name;
+    }
+    before = step.name;
+    env.redraw();
+  });
+  const rows = [
+    h('div', { class: 'grid-2' },
+      field('Name', name, 'Later steps can use this step\'s result by its name.'),
+      field('If this step fails', choice([['stop', 'Stop the task'], ['continue', 'Continue with the next step']],
+        step.on_error || 'stop', (v) => { step.on_error = v; }))),
+  ];
+  if (isFilter) {
+    rows.push(h('div', { class: 'grid-2' },
+      field("If it doesn't match", choice([['stop', 'Stop the task'], ['continue', 'Continue (later steps can check the result)']],
+        step.on_no_match || 'stop', (v) => { step.on_no_match = v; })),
+      field('Invert', h('label', { class: 'check' },
+        h('input', { type: 'checkbox', checked: !!step.negate, onchange: (e) => { step.negate = e.target.checked; } }),
+        'Pass when the filter does not match'))));
+  }
+  rows.push(whenField(step, idx, env));
+
+  const bits = [step.when && step.when.step ? `if ${step.when.step}` : null, step.negate ? 'inverted' : null,
+    step.on_no_match === 'continue' ? 'continues on no match' : null, step.on_error === 'continue' ? 'continues on error' : null].filter(Boolean);
+  const det = h('details', { class: 'step-opts' },
+    h('summary', {}, 'Options', bits.length ? h('span', { class: 'muted' }, ' · ' + bits.join(' · ')) : null), rows);
+  if (env.open.has(step)) det.open = true;
+  det.addEventListener('toggle', () => { if (det.open) env.open.add(step); else env.open.delete(step); });
+  return det;
+}
 
 async function viewTaskEditor(main, id) {
   let meta, task, models = { models: [] };
@@ -587,7 +753,13 @@ async function viewTaskEditor(main, id) {
 
   task = task ? structuredClone(task) : { name: '', enabled: true, gmail_integration_id: meta.gmail[0] && meta.gmail[0].id, steps: [] };
   const label = Object.fromEntries(meta.step_types.map((s) => [s.type, s.label]));
-  const defaultLabel = meta.default_model ? `Default (${meta.default_model})` : 'Default (none set in Settings)';
+  const env = {
+    meta, models, task,
+    groupOf: Object.fromEntries(meta.step_types.map((s) => [s.type, s.group])),
+    defaultLabel: meta.default_model ? `Default (${meta.default_model})` : 'Default (none set in Settings)',
+    open: new WeakSet(),
+    redraw: () => drawSteps(),
+  };
 
   const name = h('input', { type: 'text', value: task.name, maxlength: 128, placeholder: 'e.g. Invoices to Discord' });
   const inbox = h('select', {}, meta.gmail.map((g) => h('option', { value: g.id }, `${g.name} · ${g.email}`)));
@@ -597,53 +769,19 @@ async function viewTaskEditor(main, id) {
   const err = h('p', { class: 'error-box hidden' });
 
   function stepForm(step, idx) {
-    const c = step.config;
-    const bind = (key, el, conv) => { el.addEventListener('input', () => { c[key] = conv ? conv(el.value) : el.value; }); return el; };
-    let body;
-    if (step.type === 'filter_builtin') {
-      const att = h('select', {}, h('option', { value: '' }, 'Either'), h('option', { value: 'yes' }, 'Has attachment'), h('option', { value: 'no' }, 'No attachment'));
-      att.value = c.has_attachment === true ? 'yes' : c.has_attachment === false ? 'no' : '';
-      att.addEventListener('change', () => { c.has_attachment = att.value === 'yes' ? true : att.value === 'no' ? false : null; });
-      body = h('div', {},
-        h('div', { class: 'grid-2' },
-          field('From', bind('from', h('input', { type: 'text', value: c.from || '', placeholder: 'billing@, shop.com' }))),
-          field('To', bind('to', h('input', { type: 'text', value: c.to || '' })))),
-        field('Subject', bind('subject', h('input', { type: 'text', value: c.subject || '', placeholder: 'invoice OR receipt' }))),
-        h('div', { class: 'grid-2' },
-          field('Has the words', bind('has_words', h('input', { type: 'text', value: c.has_words || '', placeholder: 'order "shipped"' }))),
-          field("Doesn't have", bind('not_words', h('input', { type: 'text', value: c.not_words || '' })))),
-        field('Attachment', att),
-        h('div', { class: 'hint' }, 'Case-insensitive. From/To/Subject: any of several values separated by "," or " OR ". Words: all must appear; use "quotes" for phrases.'));
-    } else {
-      const ins = bind('instructions', h('textarea', { placeholder: step.type === 'filter_agent'
-        ? 'Describe which emails should pass. e.g. "Emails from a real person asking me something that needs a reply."'
-        : 'Describe the notification. e.g. "Summarise in 2 bullet points and list any due dates."' }));
-      ins.value = c.instructions || '';
-      const mdl = modelSelect(models.models, c.model, defaultLabel);
-      mdl.addEventListener('change', () => { c.model = mdl.value || null; });
-      const parts = [];
-      if (step.type === 'webhook_agent') {
-        const dsel = h('select', {}, h('option', { value: '' }, meta.discord.length ? 'Pick a webhook…' : 'No Discord webhook connected'),
-          meta.discord.map((d) => h('option', { value: d.id }, d.name)));
-        dsel.value = c.discord_integration_id || '';
-        dsel.addEventListener('change', () => { c.discord_integration_id = dsel.value ? Number(dsel.value) : null; });
-        parts.push(field('Discord webhook', dsel));
-      }
-      parts.push(field('Instructions', ins, step.type === 'filter_agent'
-        ? 'The model sees the email and these instructions; the email passes only if its reply ends with FILTER MATCH.'
-        : 'The model\'s reply is posted as an aqua embed titled "xMender Notification".'));
-      parts.push(field('Model', mdl, models.error ? models.error : 'Models are listed live from the provider.'));
-      body = h('div', {}, parts);
-    }
+    const form = STEP_FORMS[step.type];
+    const body = form ? form(step.config, env) : h('div', { class: 'muted small' }, 'Unknown step type.');
     const move = (d) => () => { const j = idx + d; [task.steps[idx], task.steps[j]] = [task.steps[j], task.steps[idx]]; drawSteps(); };
-    return h('div', { class: 'step', dataset: { type: step.type } },
+    return h('div', { class: 'step', dataset: { type: step.type, group: env.groupOf[step.type] || '' } },
       h('div', { class: 'step-head' },
-        h('div', { class: 'title' }, h('span', { class: 'n' }, `#${idx + 1}`), label[step.type]),
+        h('div', { class: 'title' }, h('span', { class: 'n' }, `#${idx + 1}`), label[step.type] || step.type,
+          step.name ? h('span', { class: 'chip step-name' }, step.name) : null),
         h('div', { class: 'btn-row' },
           h('button', { class: 'ghost small', title: 'Move up', 'aria-label': 'Move up', disabled: idx === 0, onclick: move(-1) }, '↑'),
           h('button', { class: 'ghost small', title: 'Move down', 'aria-label': 'Move down', disabled: idx === task.steps.length - 1, onclick: move(1) }, '↓'),
           h('button', { class: 'ghost small', title: 'Remove', 'aria-label': 'Remove step', onclick: () => { task.steps.splice(idx, 1); drawSteps(); } }, '✕'))),
-      body);
+      h('div', {}, body),
+      stepOptions(step, idx, env));
   }
 
   function drawSteps() {
@@ -653,7 +791,21 @@ async function viewTaskEditor(main, id) {
   }
   drawSteps();
 
-  const addSel = h('select', {}, meta.step_types.map((s) => h('option', { value: s.type }, s.label)));
+  function uniqueName(type) {
+    const base = STEP_NAME_BASE[type] || type;
+    let n = 1;
+    while (task.steps.some((s) => s.name === (n === 1 ? base : base + n))) n++;
+    return n === 1 ? base : base + n;
+  }
+
+  const groups = [];
+  for (const s of meta.step_types) {
+    let g = groups.find((x) => x.group === s.group);
+    if (!g) groups.push(g = { group: s.group, label: s.group_label, items: [] });
+    g.items.push(s);
+  }
+  const addSel = h('select', {}, groups.map((g) => h('optgroup', { label: g.label },
+    g.items.map((s) => h('option', { value: s.type }, s.label)))));
   const saveBtn = h('button', { class: 'primary', onclick: () => withBusy(saveBtn, async () => {
     err.classList.add('hidden');
     const body = { name: name.value, gmail_integration_id: Number(inbox.value), enabled: enabled.checked, steps: task.steps };
@@ -674,7 +826,7 @@ async function viewTaskEditor(main, id) {
     h('h2', {}, h('span', { class: 'dot' }), 'Steps'),
     stepsBox,
     h('div', { class: 'add-step' }, addSel, h('button', { onclick: () => {
-      task.steps.push({ type: addSel.value, config: STEP_DEFAULTS[addSel.value]() });
+      task.steps.push({ type: addSel.value, name: uniqueName(addSel.value), config: STEP_DEFAULTS[addSel.value]() });
       drawSteps();
     } }, '+ Add step')));
 }

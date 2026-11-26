@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import Integration, Task, User
 from ..security import decrypt, encrypt
-from ..services import discord, gmail, llm
+from ..services import discord, gmail, llm, pipeline
 from ..services.accounts import gmail_account
 from .deps import require
 
@@ -300,13 +300,8 @@ def delete_integration(integration_id: int, db: Session = Depends(get_db), user:
     tasks = list(db.scalars(select(Task).where(Task.user_id == user.id)))
     if integ.kind == "gmail":
         using = [t.name for t in tasks if t.gmail_integration_id == integ.id]
-    elif integ.kind == "discord":
-        using = [
-            t.name for t in tasks
-            if any(s.get("config", {}).get("discord_integration_id") == integ.id for s in t.steps)
-        ]
     else:
-        using = []
+        using = [t.name for t in tasks if integ.id in pipeline.step_refs(t.steps)]
     if using:
         raise HTTPException(409, f"Still used by task(s): {', '.join(using)}. Change or delete those first.")
     db.delete(integ)

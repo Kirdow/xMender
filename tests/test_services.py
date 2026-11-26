@@ -222,3 +222,92 @@ def test_pipeline_collects_usage(monkeypatch):
     # second step errors (webhook gone) before its LLM call; first step's usage is kept
     assert res.status == "error" and res.usage == [("filter_agent", attempt)]
     assert res.log[0]["usage"] == {"input_tokens": 1000, "output_tokens": 200, "cost_nanousd": 8_000_000}
+
+
+# --- step engine: names, conditions, error handling ---
+
+def _v(steps, **kw):
+    return pipeline.validate_steps(steps, discord_ids=kw.get("discord_ids", {7}), model_ids=None)
+
+
+def test_validate_common_options():
+    f = {"type": "filter_builtin", "config": {"subject": "invoice"}}
+    out = _v([{**f, "name": "Inv", "negate": True, "on_no_match": "continue", "on_error": "stop"},
+              {"type": "filter_builtin", "name": "b", "config": {"from": "x"},
+               "when": {"step": "inv", "op": "not_matched"}}])
+    assert out[0]["name"] == "inv" and out[0]["negate"] is True and "on_error" not in out[0]
+    assert out[1]["when"] == {"step": "inv", "op": "not_matched"}
+    # defaults are not stored
+    assert _v([f]) == [{"type": "filter_builtin", "config": filters.normalize_config({"subject": "invoice"})}]
+
+    bad = [
+        [{**f, "name": "1x"}],
+        [{**f, "name": "email"}],
+        [{**f, "name": "a"}, {**f, "name": "a"}],
+        [{**f, "when": {"step": "later", "op": "matched"}}, {**f, "name": "later"}],
+        [{**f, "name": "a"}, {**f, "when": {"step": "a", "field": "nope", "op": "equals", "value": "x"}}],
+        [{**f, "name": "a"}, {**f, "when": {"step": "a", "op": "bogus"}}],
+        [{**f, "name": "a"}, {**f, "when": {"step": "a", "field": "matched", "op": "in", "value": ""}}],
+    ]
+    for steps in bad:
+        with pytest.raises(pipeline.StepConfigError):
+            _v(steps)
+    # webhook steps are actions, not filters: no match result to test
+    hook = {"type": "webhook_agent", "name": "w",
+            "config": {"instructions": "x", "discord_integration_id": 7}}
+    with pytest.raises(pipeline.StepConfigError, match="not a filter"):
+        _v([hook, {**f, "when": {"step": "w", "op": "matched"}}])
+
+
+def test_engine_branching_and_continue(monkeypatch):
+    sent = []
+    monkeypatch.setattr(llm, "complete", lambda key, model, s, u, **kw: llm.LLMResult(
+        "text", "end_turn", model))
+    monkeypatch.setattr(discord, "send_embed", lambda url, **kw: sent.append(url))
+    ctx = pipeline.RunContext(api_key="k", default_model="d",
+                              discord={7: ("A", "https://a"), 8: ("B", "https://b")})
+    steps = _v([
+        {"type": "filter_builtin", "name": "inv", "on_no_match": "continue",
+         "config": {"subject": "invoice"}},
+        {"type": "webhook_agent", "when": {"step": "inv", "op": "matched"},
+         "config": {"instructions": "x", "discord_integration_id": 7}},
+        {"type": "webhook_agent", "when": {"step": "inv", "op": "not_matched"},
+         "config": {"instructions": "x", "discord_integration_id": 8}},
+    ], discord_ids={7, 8})
+    res = pipeline.run_task(steps, make_mail(), ctx)
+    assert res.status == "completed" and sent == ["https://a"]
+    assert [e["outcome"] for e in res.log] == ["pass", "sent", "skip"]
+    assert res.vars == {"inv": {"matched": True}}
+
+    res = pipeline.run_task(steps, make_mail(subject="hello"), ctx)
+    assert sent[-1] == "https://b" and [e["outcome"] for e in res.log] == ["no-match", "skip", "sent"]
+
+    # negate flips the result; a stop still ends the chain
+    neg = _v([{"type": "filter_builtin", "negate": True, "config": {"subject": "invoice"}}])
+    res = pipeline.run_task(neg, make_mail(), ctx)
+    assert res.status == "stopped" and res.log[0]["detail"].startswith("inverted")
+
+    # on_error continue -> partial
+    broken = _v([
+        {"type": "webhook_agent", "on_error": "continue",
+         "config": {"instructions": "x", "discord_integration_id": 7}},
+        {"type": "webhook_agent", "config": {"instructions": "x", "discord_integration_id": 8}},
+    ], discord_ids={7, 8})
+    res = pipeline.run_task(broken, make_mail(), pipeline.RunContext(
+        api_key="k", default_model="d", discord={8: ("B", "https://b")}))
+    assert res.status == "partial" and [e["outcome"] for e in res.log] == ["error", "sent"]
+
+
+def test_conditions():
+    st = pipeline.RunState(vars={"c": {"label": "Invoice", "n": 3, "flag": False, "empty": None}})
+    hold = lambda **w: pipeline.condition_holds({"step": "c", **w}, st)  # noqa: E731
+    assert hold(field="label", op="equals", value="invoice")
+    assert hold(field="label", op="in", value=["receipt", "INVOICE"])
+    assert hold(field="label", op="not_in", value=["receipt"])
+    assert hold(field="label", op="contains", value="voi")
+    assert hold(field="n", op="equals", value="3")
+    assert hold(field="flag", op="equals", value="false")
+    assert hold(field="empty", op="is_empty") and not hold(field="empty", op="is_set")
+    # a step that never ran has no outputs
+    assert not pipeline.condition_holds({"step": "zz", "op": "matched"}, st)
+    assert not pipeline.condition_holds({"step": "zz", "op": "not_matched"}, st)
