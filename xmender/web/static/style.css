@@ -351,3 +351,94 @@ button.reveal:hover, button.reveal.active { color: var(--primary); }
 .chain-line { margin-top: 4px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .chain-line .chip-name { color: var(--primary); }
 .broken-list { margin: 8px 0; padding-left: 18px; color: var(--danger); overflow-wrap: anywhere; }
+
+/* ── Docs (docs.js): shared by the in-app modal and the /docs page ── */
+.nav-sep { height: 1px; margin: 14px 10px; background: color-mix(in srgb, var(--fg) 11%, transparent); }
+.nav-docs { display: flex; align-items: stretch; gap: 2px; }
+.nav .nav-docs a.docs-open { flex: 1; min-width: 0; margin-bottom: 0; }
+.nav .nav-docs a.docs-ext { padding: 8px; margin-bottom: 0; border-left: none; color: var(--muted); }
+.nav .nav-docs a.docs-ext:hover { color: var(--primary); }
+@media (max-width: 760px) {
+  .nav-sep { width: 1px; height: auto; margin: 4px 6px; }
+  .nav .nav-docs a.docs-ext { display: none; }
+}
+
+.modal-backdrop.docs-backdrop { padding: 4vh 16px; }
+.modal.docs-modal { width: 1120px; height: 92vh; display: flex; flex-direction: column; padding: 14px 18px 0; }
+.docs-modal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.docs-modal-head h3 { margin: 0; flex: 1; }
+.docs-modal-head svg { width: 14px; height: 14px; }
+.docs-modal-body { flex: 1; min-height: 0; }
+.docs-modal .docs { height: 100%; }
+.docs-modal .docs-side, .docs-modal .docs-content { overflow-y: auto; }
+
+.docs { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: 0; }
+.docs-side { border-right: 1px solid var(--faint); padding: 2px 12px 16px 0; }
+.docs-search { margin-bottom: 12px; }
+input[type=search].docs-search {
+  width: 100%; padding: 0.5rem 0.7rem; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 6px; font: inherit; font-size: 0.82rem;
+}
+.docs-group { margin-bottom: 12px; }
+.docs-group-title { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 4px 8px; }
+a.docs-toc-item { display: block; padding: 4px 8px; border-radius: 6px; font-size: 0.8rem; text-decoration: none; color: color-mix(in srgb, var(--fg) 80%, transparent); border-left: 2px solid transparent; }
+a.docs-toc-item:hover { background: var(--faint); color: var(--fg); }
+a.docs-toc-item.active { color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); border-left-color: var(--primary); }
+.docs-toc-sub { margin: 2px 0 6px 10px; border-left: 1px solid var(--faint); }
+a.docs-toc-item.sub { font-size: 0.74rem; padding: 3px 8px; color: var(--muted); }
+a.docs-toc-item.sub:hover { color: var(--fg); }
+
+.docs-content { padding: 0 8px 40px 28px; font-size: 0.84rem; line-height: 1.7; }
+.docs-content > * { max-width: 82ch; }
+.docs-content h1 { font-size: 1.3rem; margin: 4px 0 14px; }
+.docs-content h2 { display: block; font-size: 1.02rem; margin: 30px 0 10px; padding-top: 4px; color: var(--primary); }
+.docs-content h3 { font-size: 0.9rem; margin: 22px 0 8px; color: var(--secondary); }
+.docs-content h4 { font-size: 0.84rem; margin: 16px 0 6px; }
+.docs-content p { margin: 0 0 12px; }
+.docs-content ul, .docs-content ol { margin: 0 0 12px; padding-left: 22px; }
+.docs-content li > p { margin: 0 0 4px; }
+.docs-content li > ul, .docs-content li > ol { margin-bottom: 4px; }
+.docs-content .callout { font-size: 0.82rem; }
+.docs-content .callout > :last-child { margin-bottom: 0; }
+.docs-content .table-wrap { margin: 0 0 14px; }
+.docs-table td { padding: 6px 8px; vertical-align: top; }
+.docs-table th { padding: 6px 8px; }
+pre.docs-code {
+  background: var(--bg); border: 1px solid var(--faint); border-radius: 8px; padding: 10px 12px;
+  margin: 0 0 14px; overflow-x: auto; font-size: 0.78rem; line-height: 1.55;
+}
+pre.docs-code code { background: none; padding: 0; font-size: inherit; }
+.docs-content code, .docs-hits code { font-variant-ligatures: none; overflow-wrap: anywhere; }
+a.docs-permalink { margin-left: 8px; color: var(--muted); text-decoration: none; opacity: 0; font-weight: 400; }
+h2:hover > a.docs-permalink, h3:hover > a.docs-permalink, h4:hover > a.docs-permalink, a.docs-permalink:focus-visible { opacity: 1; }
+.docs-flash { animation: docs-flash 1.6s ease-out; }
+@keyframes docs-flash { from { background: color-mix(in srgb, var(--ternary) 25%, transparent); } to { background: transparent; } }
+.docs-pager { display: flex; justify-content: space-between; gap: 8px; margin-top: 32px; padding-top: 14px; border-top: 1px solid var(--faint); }
+.docs-hits { display: flex; flex-direction: column; gap: 8px; }
+a.docs-hit { display: block; padding: 10px 12px; border: 1px solid var(--faint); border-radius: 8px; text-decoration: none; color: var(--fg); }
+a.docs-hit:hover { border-color: var(--primary); color: var(--fg); }
+.docs-hit-title { font-weight: 600; font-size: 0.82rem; color: var(--primary); }
+.docs-hit-text { color: var(--muted); font-size: 0.76rem; margin-top: 3px; overflow-wrap: anywhere; }
+mark { background: color-mix(in srgb, var(--ternary) 35%, transparent); color: inherit; border-radius: 3px; }
+
+.docs-page { min-height: 100vh; }
+.docs-page-head {
+  position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px 24px; background: var(--panel); border-bottom: 1px solid color-mix(in srgb, var(--fg) 11%, transparent);
+}
+a.docs-brand { font-size: 1.25rem; text-decoration: none; }
+a.docs-brand .muted { font-size: 0.85rem; }
+.docs-page-body { max-width: 1240px; margin: 0 auto; padding: 22px 24px 40px; }
+.docs-page-body .docs-side { position: sticky; top: 76px; align-self: start; max-height: calc(100vh - 96px); overflow-y: auto; }
+.docs-page-body [data-anchor] { scroll-margin-top: 76px; }
+.docs-page-body .docs-content { min-height: 60vh; }
+
+@media (max-width: 760px) {
+  .docs { grid-template-columns: 1fr; }
+  .docs-side { border-right: none; border-bottom: 1px solid var(--faint); padding: 0 0 8px; max-height: 32vh; overflow-y: auto; }
+  .docs-page-body .docs-side { position: static; max-height: 40vh; }
+  .docs-content { padding: 14px 0 32px; }
+  .modal.docs-modal { height: 94vh; padding: 12px 12px 0; }
+  .docs-modal .docs { grid-template-rows: auto minmax(0, 1fr); }
+  .docs-page-body, .docs-page-head { padding-left: 16px; padding-right: 16px; }
+}

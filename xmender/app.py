@@ -68,4 +68,9 @@ def create_app(*, start_poller: bool = True) -> FastAPI:
     def index():
         return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
+    # Public user docs (no login): the same content the in-app Docs modal shows.
+    @app.get("/docs", include_in_schema=False)
+    def docs():
+        return FileResponse(STATIC_DIR / "docs.html", headers={"Cache-Control": "no-cache"})
+
     return app
