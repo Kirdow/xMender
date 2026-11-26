@@ -95,6 +95,11 @@ Rules:
   feature sends email yet.
 - Secrets never leave the API: responses carry hints only (`key_hint`,
   `url_hint`). On edit, a blank secret field means "keep the stored one".
+- Connected Gmail addresses and the Anthropic key are masked in the UI
+  (`masking.py`: `j*****e+tag@gmail.com`, `sk-ant-••••`). Only
+  `GET /api/integrations` sends the full address (and `key_hint`) for the
+  hold-to-reveal eye (`holdToReveal()` in `app.js`); every other endpoint
+  sends `mask_email()` output. Never add a reveal outside Integrations.
 - An integration referenced by a task cannot be deleted (409); steps report
   their references through `StepDef.refs`.
 - HTTP webhooks (`services/http_hook.py`): the secret is JSON

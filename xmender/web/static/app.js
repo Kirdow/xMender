@@ -48,7 +48,28 @@ const ICONS = {
   logout: ['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'M16 17l5-5-5-5', 'M21 12H9'],
   refresh: ['M21 12a9 9 0 1 1-2.6-6.4', 'M21 3v6h-6'],
   chevron: ['M6 9l6 6 6-6'],
+  eye: ['M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z'],
 };
+
+/* Eye button that calls show(true) while held (mouse, touch or Space/Enter) and
+   show(false) on release. Integrations page only; other pages never reveal. */
+function holdToReveal(show, label) {
+  const btn = h('button', { type: 'button', class: 'reveal', title: `Hold to show ${label}`, 'aria-label': `Hold to show ${label}` }, icon(ICONS.eye));
+  const on = (e) => { if (e.button !== undefined && e.button !== 0) return; e.preventDefault(); btn.classList.add('active'); show(true); };
+  const off = () => { if (!btn.classList.contains('active')) return; btn.classList.remove('active'); show(false); };
+  btn.addEventListener('pointerdown', on);
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel', 'blur']) btn.addEventListener(ev, off);
+  btn.addEventListener('keydown', (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) on(e); });
+  btn.addEventListener('keyup', (e) => { if (e.key === ' ' || e.key === 'Enter') off(); });
+  btn.addEventListener('contextmenu', (e) => e.preventDefault());
+  return btn;
+}
+
+// Masked text with a hold-to-reveal eye button.
+function revealText(masked, full, label) {
+  const text = h('span', { class: 'masked' }, masked);
+  return h('span', { class: 'reveal-wrap' }, text, holdToReveal((v) => { text.textContent = v ? full : masked; }, label));
+}
 
 async function api(method, path, body) {
   const opts = { method, headers: { 'x-xmender': '1' }, credentials: 'same-origin' };
@@ -387,13 +408,15 @@ async function viewIntegrations(main) {
   const anthCard = h('div', { class: 'card accent-pink' },
     h('div', { class: 'card-head' },
       h('div', {}, h('div', { class: 'card-title' }, 'Anthropic API'),
-        h('div', { class: 'card-sub' }, anth ? `Key ${anth.key_hint}` : 'Not connected. Needed for every agent step.')),
+        h('div', { class: 'card-sub' }, anth
+          ? ['Key ', revealText(`${anth.key_prefix}••••••••`, anth.key_hint, 'key hint')]
+          : 'Not connected. Needed for every agent step.')),
       h('button', { class: anth ? '' : 'primary', onclick: () => anthropicModal(reload) }, anth ? 'Replace key' : 'Connect')),
     anth ? h('div', { class: 'chips' }, h('span', { class: 'chip lime' }, 'connected')) : null);
 
   const gmailCards = data.gmail.map((g) => h('div', { class: 'card accent-aqua' },
     h('div', { class: 'card-head' },
-      h('div', {}, h('div', { class: 'card-title' }, g.name), h('div', { class: 'card-sub' }, `${g.email} · From: ${g.from_name}`)),
+      h('div', {}, h('div', { class: 'card-title' }, g.name), h('div', { class: 'card-sub' }, gmailSub(g))),
       h('div', { class: 'btn-row' },
         h('button', { class: 'small', onclick: () => gmailModal(data.defaults, g, reload) }, 'Edit'),
         h('button', { class: 'small danger', onclick: () => deleteIntegration(g.id, g.name, reload) }, 'Delete'))),
@@ -435,6 +458,16 @@ async function viewIntegrations(main) {
     httpCards.length ? httpCards : h('div', { class: 'empty' }, 'No HTTP webhook yet. Use one to send mail data to ntfy, Slack, Home Assistant or your own service.'));
 }
 
+function gmailSub(g) {
+  const text = h('span', { class: 'masked' });
+  const show = (full) => {
+    const addr = full ? g.email : g.email_masked;
+    text.textContent = `${addr} · From: ${g.display_name || addr}`;
+  };
+  show(false);
+  return h('span', { class: 'reveal-wrap' }, text, holdToReveal(show, 'address'));
+}
+
 async function deleteIntegration(id, name, reload) {
   if (!(await confirmDialog('Delete integration', `Delete "${name}"? Its stored credentials are removed.`, 'Delete', true))) return;
   try { await api('DELETE', `/api/integrations/${id}`); toast('Deleted.', 'ok'); reload(); } catch (e) { toast(e.message, 'err'); }
@@ -462,7 +495,7 @@ function gmailModal(defaults, g, reload) {
   const v = (x, d) => (g && g[x] !== undefined && g[x] !== null ? g[x] : d);
   const f = {
     name: h('input', { type: 'text', value: v('name', 'xMender'), maxlength: 128 }),
-    email: h('input', { type: 'email', value: v('email', ''), placeholder: 'you@gmail.com', autocomplete: 'off' }),
+    email: h('input', { type: 'email', value: g ? g.email_masked : '', placeholder: 'you@gmail.com', autocomplete: 'off', readonly: !!g }),
     display_name: h('input', { type: 'text', value: v('display_name', ''), maxlength: 128 }),
     password: h('input', { type: 'password', autocomplete: 'off', placeholder: g ? '(unchanged)' : 'xxxx xxxx xxxx xxxx' }),
     smtp_enabled: h('input', { type: 'checkbox', checked: v('smtp_enabled', false) }),
@@ -480,6 +513,14 @@ function gmailModal(defaults, g, reload) {
   } }, 'Paste');
   if (!navigator.clipboard || !navigator.clipboard.readText) pasteBtn.disabled = true;
 
+  // Editing: keep the stored address masked unless revealed or replaced.
+  let emailEdited = !g;
+  const emailReveal = g ? holdToReveal((on) => { if (!emailEdited) f.email.value = on ? g.email : g.email_masked; }, 'address') : null;
+  const emailChange = g ? h('button', { type: 'button', onclick: (e) => {
+    emailEdited = true; f.email.readOnly = false; f.email.value = ''; f.email.placeholder = 'you@gmail.com';
+    emailReveal.remove(); e.currentTarget.remove(); f.email.focus();
+  } }, 'Change') : null;
+
   const advanced = h('div', { class: 'hidden' },
     h('div', { class: 'grid-2' }, field('IMAP host', f.imap_host), field('IMAP port (SSL)', f.imap_port)),
     h('div', { class: 'grid-2' }, field('SMTP host', f.smtp_host), field('SMTP port (SSL)', f.smtp_port)));
@@ -487,7 +528,8 @@ function gmailModal(defaults, g, reload) {
 
   const body = h('div', {}, err,
     field('Name', f.name, 'Display name for xMender itself.'),
-    field('Gmail address', f.email, 'Plain address, no + alias. Used as the From address when sending.'),
+    field('Gmail address', g ? h('div', { class: 'input-row' }, f.email, emailReveal, emailChange) : f.email,
+      'Plain address, no + alias. Used as the From address when sending.'),
     field('Display name', f.display_name, 'Shown in the From field. Empty = the address itself.'),
     h('div', { class: 'callout aqua' },
       'Use an App Password made for xMender, not your Google password. 2-Step Verification must be on.',
@@ -506,7 +548,7 @@ function gmailModal(defaults, g, reload) {
 
   const payload = (save) => ({
     id: g ? g.id : null, save,
-    name: f.name.value, email: f.email.value, display_name: f.display_name.value,
+    name: f.name.value, email: emailEdited ? f.email.value : g.email, display_name: f.display_name.value,
     password: f.password.value || null, smtp_enabled: f.smtp_enabled.checked,
     imap_host: f.imap_host.value, imap_port: Number(f.imap_port.value),
     smtp_host: f.smtp_host.value, smtp_port: Number(f.smtp_port.value),

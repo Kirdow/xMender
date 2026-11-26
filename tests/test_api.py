@@ -65,7 +65,17 @@ def test_integrations_and_tasks(admin, monkeypatch):
     r = c.post("/api/tasks", json={"name": "T", "gmail_integration_id": g["id"], "steps": steps})
     assert r.status_code == 400 and "Anthropic" in r.text
 
-    assert c.post("/api/integrations/anthropic", json={"api_key": "sk-ant-test-123456"}).status_code == 200
+    r = c.post("/api/integrations/anthropic", json={"api_key": "sk-ant-test-123456"})
+    assert r.status_code == 200
+    a = r.json()["integration"]
+    assert a["key_prefix"] == "sk-ant-" and a["key_hint"] == "sk-ant-…3456"
+
+    # The address is masked everywhere; only the integrations list has it in full.
+    gi = c.get("/api/integrations").json()["gmail"][0]
+    assert gi["email"] == "me@gmail.com" and gi["email_masked"] == "**@gmail.com"
+    assert "from_name" not in gi
+    assert c.get("/api/status").json()["inboxes"][0]["email"] == "**@gmail.com"
+    assert c.get("/api/tasks/meta").json()["gmail"][0]["email"] == "**@gmail.com"
     r = c.post("/api/tasks", json={"name": "T", "gmail_integration_id": g["id"], "steps": steps})
     assert r.status_code == 400 and "default model" in r.text
     assert c.put("/api/me/settings", json={"default_model": "nope"}).status_code == 400

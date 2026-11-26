@@ -329,3 +329,11 @@ code { background: var(--faint); padding: 1px 5px; border-radius: 4px; font-size
 .small { font-size: 0.78rem; }
 .mt { margin-top: 12px; }
 .mb0 { margin-bottom: 0; }
+
+/* ── Hold-to-reveal ── */
+.reveal-wrap { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+.reveal-wrap .masked { overflow-wrap: anywhere; }
+button.reveal { padding: 2px 6px; line-height: 0; background: transparent; border-color: transparent; color: var(--muted); touch-action: none; user-select: none; -webkit-user-select: none; }
+button.reveal svg { width: 15px; height: 15px; display: block; }
+button.reveal:hover, button.reveal.active { color: var(--primary); }
+.input-row button.reveal { border-color: var(--border); padding: 0 10px; }

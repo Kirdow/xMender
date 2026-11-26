@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
+from ..masking import key_prefix, mask_email
 from ..models import Integration, Task, User
 from ..security import decrypt, encrypt
 from ..services import discord, gmail, http_hook, llm, pipeline
@@ -38,8 +39,8 @@ def _gmail_dict(i: Integration) -> dict[str, Any]:
         "id": i.id,
         "name": i.name,
         "email": c.get("email"),
+        "email_masked": mask_email(c.get("email")),
         "display_name": c.get("display_name") or "",
-        "from_name": c.get("display_name") or c.get("email"),
         "smtp_enabled": bool(c.get("smtp_enabled")),
         "imap_host": c.get("imap_host"),
         "imap_port": c.get("imap_port"),
@@ -78,7 +79,8 @@ def _http_dict(i: Integration) -> dict[str, Any]:
 
 
 def _anthropic_dict(i: Integration) -> dict[str, Any]:
-    return {"id": i.id, "key_hint": i.config.get("key_hint", "")}
+    hint = i.config.get("key_hint", "")
+    return {"id": i.id, "key_prefix": key_prefix(hint), "key_hint": hint}
 
 
 def _owned(db: Session, user: User, integration_id: int, kind: str | None = None) -> Integration:

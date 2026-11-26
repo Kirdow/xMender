@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..masking import mask_email
 from ..models import Integration, Task, User
 from ..services import gmail, llm, pipeline, signals
 from ..services.accounts import anthropic_key, discord_ids, http_ids
@@ -45,7 +46,7 @@ def meta(db: Session = Depends(get_db), user: User = Depends(require("tasks"))):
     gm, dc, hp = [], [], []
     for r in rows:
         {"gmail": gm, "discord": dc, "http": hp}[r.kind].append(
-            {"id": r.id, "name": r.name, **({"email": r.config.get("email")} if r.kind == "gmail" else {})}
+            {"id": r.id, "name": r.name, **({"email": mask_email(r.config.get("email"))} if r.kind == "gmail" else {})}
         )
     return {
         "step_types": pipeline.step_types_meta(),

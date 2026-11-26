@@ -878,3 +878,14 @@ def test_gmail_filter():
     assert res.status == "error" and "not available" in res.log[0]["detail"]
     with pytest.raises(pipeline.StepConfigError):
         _v([{"type": "filter_gmail", "config": {"categories": [], "labels": " "}}])
+
+
+def test_mask_email():
+    from xmender.masking import key_prefix, mask_email
+
+    assert mask_email("johndoe@gmail.com") == "j*****e@gmail.com"
+    assert mask_email("johndoe+facebook@gmail.com") == "j*****e+facebook@gmail.com"
+    assert mask_email("abc@gmail.com") == "a*c@gmail.com"
+    assert mask_email("ab@x.com") == "**@x.com"
+    assert mask_email("") == "" and mask_email(None) == ""
+    assert key_prefix("sk-ant-…abcd") == "sk-ant-" and key_prefix("••••") == ""

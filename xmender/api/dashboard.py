@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
+from ..masking import mask_email
 from ..models import Email, Integration, TaskRun, User, utcnow
 from ..services import llm, timewindow, usage
 from ..services.accounts import anthropic_key
@@ -33,7 +34,7 @@ def status(db: Session = Depends(get_db), user: User = Depends(current_user)):
             {
                 "id": r.id,
                 "name": r.name,
-                "email": r.config.get("email"),
+                "email": mask_email(r.config.get("email")),
                 "last_polled_at": (r.state or {}).get("last_polled_at"),
                 "last_error": (r.state or {}).get("last_error"),
                 "pending": (r.state or {}).get("pending", 0),
