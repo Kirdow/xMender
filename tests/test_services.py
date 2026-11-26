@@ -763,3 +763,71 @@ def test_attachments_to_llm(monkeypatch):
     assert "untrusted data" in content[-1]["text"] and res.log[0]["attachments"] == ["bill.pdf"]
     assert "huge.pdf" in res.log[0]["warning"]
     assert isinstance(seen[1], str)  # attachments off: plain text prompt
+
+
+# --- Gmail labels / categories ---
+
+class FakeIMAP:
+    def __init__(self, gmail_ext=True, fail_search=False):
+        self.capabilities = ("IMAP4REV1", "X-GM-EXT-1") if gmail_ext else ("IMAP4REV1",)
+        self.calls = []
+        self.fail_search = fail_search
+
+    def select(self, box, readonly=False):
+        assert readonly
+        return "OK", [b"3"]
+
+    def status(self, box, items):
+        return "OK", [b"INBOX (UIDVALIDITY 7 UIDNEXT 13)"]
+
+    def uid(self, cmd, *args):
+        self.calls.append((cmd, args))
+        if cmd == "SEARCH" and args[1:2] == ("UID",):
+            if self.fail_search:
+                raise gmail.imaplib.IMAP4.error("bad search")
+            cat = args[-1]
+            return "OK", [{'"category:promotions"': b"11", '"category:updates"': b"12"}.get(cat, b"")]
+        if cmd == "SEARCH":
+            return "OK", [b"10 11 12"]
+        uid = args[0]
+        meta = f'{uid} (X-GM-LABELS (\\Inbox "Bills") UID {uid} BODY[] {{3}}'.encode()
+        return "OK", [(meta, b"raw"), b")"]
+
+    def logout(self):
+        pass
+
+
+def test_fetch_gmail_labels_and_categories(monkeypatch):
+    fake = FakeIMAP()
+    monkeypatch.setattr(gmail, "_imap_login", lambda acct: fake)
+    res = gmail.fetch_new(gmail.Account("a@gmail.com", "p"), 7, 9, 10)
+    assert [u for u, _ in res.messages] == [10, 11, 12]
+    assert res.gmail_meta[10] == {"labels": ["\\Inbox", "Bills"], "category": "primary"}
+    assert res.gmail_meta[11]["category"] == "promotions" and res.gmail_meta[12]["category"] == "updates"
+    assert ("FETCH", ("10", "(BODY.PEEK[] X-GM-LABELS)")) in fake.calls
+
+    # search failure: labels kept, category unknown, poll still succeeds
+    monkeypatch.setattr(gmail, "_imap_login", lambda acct: FakeIMAP(fail_search=True))
+    res = gmail.fetch_new(gmail.Account("a@gmail.com", "p"), 7, 9, 10)
+    assert res.gmail_meta[10] == {"labels": ["\\Inbox", "Bills"]}
+
+    # not Gmail: plain fetch, no metadata
+    plain = FakeIMAP(gmail_ext=False)
+    monkeypatch.setattr(gmail, "_imap_login", lambda acct: plain)
+    res = gmail.fetch_new(gmail.Account("a@x.com", "p"), 7, 9, 10)
+    assert res.gmail_meta == {} and ("FETCH", ("10", "(BODY.PEEK[])")) in plain.calls
+
+
+def test_gmail_filter():
+    assert gmail._imap_utf7_decode("Kvitton/&AOU-r &- more") == "Kvitton/år & more"
+    steps = _v([{"type": "filter_gmail", "name": "g", "config": {"categories": ["primary", "nope"], "labels": "bills, Starred"}}])
+    assert steps[0]["config"] == {"categories": ["primary"], "labels": "bills, Starred"}
+    run = lambda **kw: pipeline.run_task(steps, make_mail(**kw), pipeline.RunContext(None, None))  # noqa: E731
+    res = run(labels=["\\Inbox", "\\Starred"], category="primary")
+    assert res.status == "completed" and res.vars["g"]["labels"] == "Inbox, Starred"
+    assert run(labels=["Bills"], category="promotions").status == "stopped"
+    assert run(labels=["Work"], category="primary").status == "stopped"
+    res = run()  # not a Gmail server
+    assert res.status == "error" and "not available" in res.log[0]["detail"]
+    with pytest.raises(pipeline.StepConfigError):
+        _v([{"type": "filter_gmail", "config": {"categories": [], "labels": " "}}])

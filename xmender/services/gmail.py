@@ -5,6 +5,7 @@ All functions here are blocking; call them through `asyncio.to_thread`.
 
 from __future__ import annotations
 
+import base64
 import email
 import imaplib
 import re
@@ -123,6 +124,10 @@ def test_smtp(acct: Account) -> None:
         raise GmailError(f"SMTP: cannot connect to {acct.smtp_host}:{acct.smtp_port} ({e}).") from e
 
 
+# Gmail inbox categories, searchable with X-GM-RAW "category:<name>".
+CATEGORIES = ("primary", "social", "promotions", "updates", "forums")
+
+
 @dataclass
 class FetchResult:
     uidvalidity: int
@@ -130,6 +135,8 @@ class FetchResult:
     messages: list[tuple[int, bytes]] = field(default_factory=list)
     reset: bool = False
     pending: int = 0
+    # uid -> {"labels": [...], "category": str}; only on Gmail (X-GM-EXT-1).
+    gmail_meta: dict[int, dict] = field(default_factory=dict)
 
 
 def fetch_new(acct: Account, uidvalidity: int | None, last_uid: int | None, limit: int) -> FetchResult:
@@ -152,16 +159,112 @@ def fetch_new(acct: Account, uidvalidity: int | None, last_uid: int | None, limi
             raise GmailError("IMAP: search failed.")
         uids = sorted(int(u) for u in (data[0] or b"").split() if int(u) > last_uid)
         result = FetchResult(uidvalidity=validity, last_uid=last_uid, pending=max(0, len(uids) - limit))
+        is_gmail = _has_gmail_ext(conn)
+        items = "(BODY.PEEK[] X-GM-LABELS)" if is_gmail else "(BODY.PEEK[])"
         for uid in uids[:limit]:
-            typ, parts = conn.uid("FETCH", str(uid), "(BODY.PEEK[])")
+            typ, parts = conn.uid("FETCH", str(uid), items)
             if typ != "OK":
                 raise GmailError(f"IMAP: fetching UID {uid} failed.")
             raw = next((p[1] for p in parts if isinstance(p, tuple) and len(p) > 1), None)
             if raw is not None:
                 result.messages.append((uid, raw))
+                if is_gmail:
+                    result.gmail_meta[uid] = {"labels": parse_labels(parts)}
+        if is_gmail and result.messages:
+            _add_categories(conn, result)
         return result
     finally:
         _safe_logout(conn)
+
+
+def _has_gmail_ext(conn: imaplib.IMAP4) -> bool:
+    try:
+        return "X-GM-EXT-1" in (conn.capabilities or ())
+    except Exception:
+        return False
+
+
+def _add_categories(conn: imaplib.IMAP4, result: FetchResult) -> None:
+    """Fill `category` for fetched messages with one search per category.
+    Failures leave the category unknown rather than failing the poll."""
+    uids = [u for u, _ in result.messages]
+    span = f"{min(uids)}:{max(uids)}"
+    found: dict[int, str] = {}
+    try:
+        for cat in CATEGORIES[1:]:
+            typ, data = conn.uid("SEARCH", None, "UID", span, "X-GM-RAW", f'"category:{cat}"')
+            if typ != "OK":
+                return
+            for u in (data[0] or b"").split():
+                found.setdefault(int(u), cat)
+    except (imaplib.IMAP4.error, OSError, ValueError):
+        return
+    for uid in uids:
+        if uid in result.gmail_meta:
+            result.gmail_meta[uid]["category"] = found.get(uid, "primary")
+
+
+def _imap_utf7_decode(s: str) -> str:
+    """Decode IMAP modified UTF-7 (RFC 3501 5.1.3), used for label names."""
+    out, i = [], 0
+    while i < len(s):
+        if s[i] == "&":
+            j = s.find("-", i)
+            if j < 0:
+                out.append(s[i:])
+                break
+            chunk = s[i + 1:j]
+            if not chunk:
+                out.append("&")
+            else:
+                b64 = chunk.replace(",", "/")
+                b64 += "=" * (-len(b64) % 4)
+                try:
+                    out.append(base64.b64decode(b64).decode("utf-16-be"))
+                except Exception:
+                    out.append(s[i:j + 1])
+            i = j + 1
+        else:
+            out.append(s[i])
+            i += 1
+    return "".join(out)
+
+
+def parse_labels(parts: list) -> list[str]:
+    """Labels from a FETCH response containing X-GM-LABELS (...). System
+    labels keep their backslash (\\Inbox, \\Important)."""
+    text = ""
+    for p in parts:
+        chunk = p[0] if isinstance(p, tuple) else p
+        if isinstance(chunk, bytes):
+            text += chunk.decode("utf-8", "replace") + " "
+    start = text.find("X-GM-LABELS (")
+    if start < 0:
+        return []
+    i = start + len("X-GM-LABELS (")
+    labels: list[str] = []
+    while i < len(text):
+        ch = text[i]
+        if ch == ")":
+            break
+        if ch == " ":
+            i += 1
+        elif ch == '"':
+            j, buf = i + 1, []
+            while j < len(text) and text[j] != '"':
+                if text[j] == "\\" and j + 1 < len(text):
+                    j += 1
+                buf.append(text[j])
+                j += 1
+            labels.append("".join(buf))
+            i = j + 1
+        else:
+            j = i
+            while j < len(text) and text[j] not in " )":
+                j += 1
+            labels.append(text[i:j])
+            i = j
+    return [_imap_utf7_decode(lb) for lb in labels if lb]
 
 
 # --- Parsing -----------------------------------------------------------------
@@ -240,6 +343,9 @@ class ParsedEmail:
     attachments: list[Attachment]
     # Lowercased header name -> every value, in message order.
     headers: dict[str, list[str]] = field(default_factory=dict)
+    # Gmail only, set by the poller from the IMAP fetch; None when unknown.
+    labels: list[str] | None = None
+    category: str | None = None
 
     @property
     def has_attachment(self) -> bool:

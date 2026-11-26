@@ -1,8 +1,8 @@
 # xMender
 
 AI-agent based everyday automation. For now: watch a Gmail inbox, run each new
-email through user-defined **tasks** (filters and agent steps), and post
-results to Discord.
+email through user-defined **tasks** (filters, agent steps and actions), and
+post results to Discord or any HTTP endpoint.
 
 - Python 3.11+ (developed on 3.14), FastAPI, SQLAlchemy + Alembic
 - Web UI on `http://127.0.0.1:25879`
@@ -89,18 +89,46 @@ All are tested before saving.
 
 ## Tasks
 
-A task belongs to one Gmail inbox and is an ordered chain of steps:
+A task belongs to one Gmail inbox and is an ordered chain of steps.
+
+**Filters** (a non-match ends the chain unless the filter is set to continue):
+
+| Step | Matches |
+|---|---|
+| Filter (Built-in) | Gmail-style From/To/Subject/has words/doesn't have, optional regex mode, attachment type/name/size. |
+| Filter (Newsletter / bulk) | Mailing lists (List-Unsubscribe/List-Id), bulk or automated mail, no-reply senders. |
+| Filter (Gmail category / label) | Gmail's inbox tab (Primary, Promotions, ...) and/or labels, including ones your Gmail filters set. |
+| Filter (Time window) | Mail processed on chosen days between two times, in your time zone (Settings). |
+| Filter (Sender history) | First mail from a sender, a known sender, or one writing at least N times in D days. |
+| Filter (Phishing signals) | Failed SPF/DKIM/DMARC (Gmail's verdict), Reply-To mismatch, address in display name, imitated names, free mail. |
+| Filter (Agent) | The LLM reviews the email against your instructions; passes only if the reply ends with `FILTER MATCH`. |
+
+**Agents:**
 
 | Step | Does |
 |---|---|
-| Filter (Built-in) | Gmail-style From/To/Subject/has words/doesn't have/attachment. No match ends the chain. |
-| Filter (Agent) | The LLM reviews the email against your instructions; passes only if the reply ends with `FILTER MATCH`. |
-| Webhook (Agent) | The LLM writes a notification from your instructions; posted as an aqua embed titled `xMender Notification`. |
+| Classify (Agent) | Puts the email into one of your categories (or `other`). |
+| Extract (Agent) | Pulls typed fields (text, number, date, yes/no) out of the email. |
 
-Agent steps use the step's model or your default model (Settings). Prompts
-wrap the email and your instructions in per-call random tags, mark the email
-as untrusted data, and give the model no tools. Webhook posts disable all
-mentions.
+**Actions:**
+
+| Step | Does |
+|---|---|
+| Webhook (Agent) | The LLM writes a notification from your instructions; posted as an aqua embed titled `xMender Notification`. |
+| Template post (Discord) | Posts a Discord embed filled from a template; no LLM. |
+| HTTP webhook | Sends a JSON or text body to an HTTP integration (ntfy, Slack, Home Assistant, ...). |
+
+Every step can have a **name**, so later steps can use its result in
+templates (`{{category.label}}`, `{{extract.amount}}`, `{{email.subject}}`)
+and in **run-if conditions** ("only if `category` label equals invoice"),
+which is how a task branches. Steps can also continue on error.
+
+Agent steps use the step's model or your default model (Settings) and can
+optionally read the email's PDF and image attachments. Prompts wrap the email
+and your instructions in per-call random tags, mark the email (and its
+attachments) as untrusted data, and give the model no tools. Posts disable
+all mentions. HTTP webhooks cannot reach this machine or the local network
+unless `XMENDER_HTTP_ALLOW_PRIVATE` is on.
 
 ## API usage
 

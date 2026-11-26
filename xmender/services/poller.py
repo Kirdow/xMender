@@ -49,7 +49,9 @@ def poll_integration(integration_id: int) -> dict[str, Any]:
         return summary
 
     for uid, raw in res.messages:
-        summary["runs"] += _process_message(integration_id, res.uidvalidity, uid, raw)
+        summary["runs"] += _process_message(
+            integration_id, res.uidvalidity, uid, raw, res.gmail_meta.get(uid)
+        )
         summary["new"] += 1
         # Advance the cursor per message so a crash never reprocesses mail.
         _save_state(integration_id, uidvalidity=res.uidvalidity, last_uid=uid)
@@ -70,8 +72,13 @@ def _save_state(integration_id: int, **changes: Any) -> None:
         integ.state = state
 
 
-def _process_message(integration_id: int, uidvalidity: int, uid: int, raw: bytes) -> int:
+def _process_message(
+    integration_id: int, uidvalidity: int, uid: int, raw: bytes, meta: dict | None = None,
+) -> int:
     mail = gmail.parse_email(raw)
+    if meta:
+        mail.labels = list(meta.get("labels") or [])
+        mail.category = meta.get("category")
     with session_scope() as db:
         integ = db.get(Integration, integration_id)
         if integ is None:

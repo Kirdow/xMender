@@ -207,3 +207,23 @@ def test_http_integration(admin, monkeypatch):
     assert r.status_code == 200, r.text
     assert c.get("/api/tasks/meta").json()["http"] == [{"id": w["id"], "name": "ntfy2"}]
     assert c.delete(f"/api/integrations/{w['id']}").status_code == 409
+
+
+def test_poller_passes_gmail_labels(admin, monkeypatch):
+    from email.message import EmailMessage
+
+    from xmender.services import pipeline, poller
+
+    msg = EmailMessage()
+    msg["From"] = "deals@shop.com"
+    msg["Subject"] = "Sale"
+    msg.set_content("50% off")
+    gid = admin.get("/api/integrations").json()["gmail"][0]["id"]
+    monkeypatch.setattr(gmail, "fetch_new", lambda acct, v, last, limit: gmail.FetchResult(
+        uidvalidity=5, last_uid=last, messages=[(103, msg.as_bytes())],
+        gmail_meta={103: {"labels": ["\\Inbox"], "category": "promotions"}}))
+    seen = []
+    monkeypatch.setattr(pipeline, "run_task", lambda steps, mail, ctx: (
+        seen.append((mail.labels, mail.category)) or pipeline.RunResult("completed", [])))
+    poller.poll_integration(gid)
+    assert seen and seen[0] == (["\\Inbox"], "promotions")

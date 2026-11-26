@@ -631,7 +631,7 @@ async function viewTasks(main, rest) {
   const newBtn = h('button', { class: 'primary', onclick: () => { location.hash = '#/tasks/new'; } }, '+ New task');
   if (!meta.gmail.length) newBtn.disabled = true;
 
-  page(main, 'Tasks', 'Each new email runs through every enabled task of its inbox, step by step. A filter that does not match ends the chain.', newBtn,
+  page(main, 'Tasks', 'Each new email runs through every enabled task of its inbox, step by step. A filter that does not match ends the chain unless it is set to continue.', newBtn,
     !meta.gmail.length ? h('div', { class: 'callout aqua' }, 'Connect a Gmail inbox first. ', can('integrations') ? h('a', { href: '#/integrations' }, 'Go to Integrations') : null) : null,
     data.tasks.length ? data.tasks.map((t) => h('div', { class: 'card accent-' + (t.enabled ? 'lime' : 'aqua') },
       h('div', { class: 'card-head' },
@@ -658,6 +658,7 @@ const STEP_DEFAULTS = {
   filter_builtin: () => ({ from: '', to: '', subject: '', has_words: '', not_words: '', regex: false, has_attachment: null,
     attachment_ext: '', attachment_name: '', attachment_type: '', attachment_min_kb: null, attachment_max_kb: null }),
   filter_bulk: () => ({ kinds: ['newsletter', 'bulk', 'noreply'] }),
+  filter_gmail: () => ({ categories: ['primary'], labels: '' }),
   filter_time: () => ({ days: [0, 1, 2, 3, 4], start: '09:00', end: '17:00', timezone: '' }),
   filter_sender: () => ({ mode: 'first_time', count: 3, days: 7 }),
   filter_phishing: () => ({ kinds: ['auth_fail', 'reply_to_mismatch', 'name_has_address'], min_signals: 1, brands: '' }),
@@ -671,10 +672,11 @@ const STEP_DEFAULTS = {
     body: '**From:** {{email.from}}\n\n{{email.snippet}}', footer: '' }),
 };
 // Default step names on add; a number is appended when taken.
-const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_sender: 'sender', filter_phishing: 'phishing', filter_agent: 'ai_filter', webhook_agent: 'notify', template_post: 'post', extract_agent: 'extract', classify_agent: 'category', http_post: 'http' };
+const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_gmail: 'gmail', filter_time: 'hours', filter_sender: 'sender', filter_phishing: 'phishing', filter_agent: 'ai_filter', webhook_agent: 'notify', template_post: 'post', extract_agent: 'extract', classify_agent: 'category', http_post: 'http' };
 // Output fields per type, mirroring the server. Filters also output `matched`.
 const STEP_OUTPUTS = {
   filter_bulk: () => ['signals'],
+  filter_gmail: () => ['category', 'labels'],
   filter_time: () => ['local_time'],
   filter_sender: () => ['seen_count'],
   filter_phishing: () => ['signals', 'count'],
@@ -686,7 +688,7 @@ const COND_OPS = [['equals', 'equals'], ['not_equals', 'does not equal'], ['cont
   ['in', 'is one of'], ['not_in', 'is not one of'], ['is_set', 'is set'], ['is_empty', 'is empty']];
 const VALUE_OPS = ['equals', 'not_equals', 'contains', 'in', 'not_in'];
 
-const EMAIL_FIELDS = ['from', 'from_name', 'from_addr', 'to', 'cc', 'subject', 'date', 'snippet', 'body', 'attachments', 'attachment_count'];
+const EMAIL_FIELDS = ['from', 'from_name', 'from_addr', 'to', 'cc', 'subject', 'date', 'snippet', 'body', 'attachments', 'attachment_count', 'category', 'labels'];
 
 // Clickable placeholders for template fields. Inserts into the template
 // field that last had focus.
@@ -812,6 +814,14 @@ const STEP_FORMS = {
     return [
       checkList(env.meta.bulk_kinds, c, 'kinds'),
       h('div', { class: 'hint' }, 'Matches when any checked signal is in the email\'s headers. Invert it (Options) to keep only personal mail.'),
+    ];
+  },
+  filter_gmail(c, env) {
+    const cats = env.meta.gmail_categories.map((k) => ({ key: k, label: k[0].toUpperCase() + k.slice(1) }));
+    return [
+      field('Inbox category', checkList(cats, c, 'categories'), 'Gmail\'s inbox tabs. Leave all unchecked to ignore the category. If you turned tabs off in Gmail, all mail is Primary.'),
+      field('Labels', bindIn(c, 'labels', h('input', { type: 'text', value: c.labels || '', placeholder: 'Bills, Work/Clients, starred, important' })),
+        'Any one of these labels is enough. Use the label name as Gmail shows it; system labels work too (important, starred). Labels set by your Gmail filters count.'),
     ];
   },
   filter_time(c) {

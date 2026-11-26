@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from . import (
-    classify_agent, extract_agent, filter_agent, filter_builtin, filter_bulk, filter_phishing, filter_sender, filter_time,
-    http_post, template_post, webhook_agent,
+    classify_agent, extract_agent, filter_agent, filter_builtin, filter_bulk, filter_gmail,
+    filter_phishing, filter_sender, filter_time, http_post, template_post, webhook_agent,
 )
 from .base import StepDef
 
@@ -13,6 +13,7 @@ REGISTRY: dict[str, StepDef] = {
     for s in (
         filter_builtin.STEP,
         filter_bulk.STEP,
+        filter_gmail.STEP,
         filter_time.STEP,
         filter_sender.STEP,
         filter_phishing.STEP,

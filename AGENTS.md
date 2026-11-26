@@ -113,7 +113,10 @@ Rules:
   `asyncio.Lock` prevents overlapping polls.
 - `poll_integration()` is blocking and runs through `asyncio.to_thread`:
   1. `gmail.fetch_new` opens INBOX read-only with `BODY.PEEK[]`, so mail is
-     never marked as read.
+     never marked as read. When the server advertises `X-GM-EXT-1` it also
+     fetches `X-GM-LABELS` and runs one `X-GM-RAW "category:..."` search per
+     category over the fetched UID range (`FetchResult.gmail_meta`); a
+     failed search only leaves the category unknown.
   2. A missing cursor or a changed UIDVALIDITY resets the cursor to "now"
      without processing, so only mail arriving after connect is handled.
   3. At most `XMENDER_POLL_BATCH_SIZE` messages are processed per poll.
@@ -140,6 +143,7 @@ blocks deleting them).
 |---|---|---|
 | `filter_builtin` | filter | `services/filters.py`, Gmail-like fields; optional regex mode (`regex` package, per-search timeout) and attachment details |
 | `filter_bulk` | filter | `services/signals.py`: List-Unsubscribe/List-Id, Precedence/Auto-Submitted/Feedback-ID, no-reply sender; outputs `signals` |
+| `filter_gmail` | filter | Gmail inbox category and/or labels from `ParsedEmail.category`/`labels` (set by the poller from `FetchResult.gmail_meta`); errors if the server lacks `X-GM-EXT-1`; outputs `category`, `labels` |
 | `filter_time` | filter | `services/timewindow.py`: days + HH:MM window in the step's zone, else `User.timezone`, else UTC; uses processing time, not the Date header |
 | `filter_sender` | filter | first time / seen before / at least N in D days, from `RunContext.sender_seen` (the poller loads earlier `Email.created_at` for the same `sender_addr`); outputs `seen_count` |
 | `filter_phishing` | filter | `services/signals.py`: auth fail (only the topmost `Authentication-Results` from `mx.google.com` is trusted), Reply-To domain mismatch, address in display name, protected-name mismatch, free mail; `min_signals` threshold; outputs `signals`, `count` |

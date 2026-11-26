@@ -25,7 +25,7 @@ MODIFIERS = {"clip", "default", "oneline", "upper", "lower"}
 
 EMAIL_FIELDS = (
     "from", "from_name", "from_addr", "to", "cc", "subject", "date", "snippet", "body",
-    "attachments", "attachment_count",
+    "attachments", "attachment_count", "category", "labels",
 )
 
 
@@ -90,6 +90,8 @@ def email_vars(mail: ParsedEmail) -> dict[str, Any]:
         "body": mail.body,
         "attachments": ", ".join(a.name for a in mail.attachments),
         "attachment_count": len(mail.attachments),
+        "category": mail.category or "",
+        "labels": ", ".join(lb.lstrip("\\") for lb in mail.labels or []),
     }
 
 
