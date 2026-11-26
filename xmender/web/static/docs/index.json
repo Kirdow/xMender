@@ -3,7 +3,36 @@
     {
       "title": "Basics",
       "sections": [
-        { "id": "overview", "title": "Overview", "file": "overview.md" }
+        { "id": "overview", "title": "Overview", "file": "overview.md" },
+        { "id": "account", "title": "Account and settings", "file": "account.md" },
+        { "id": "integrations", "title": "Integrations", "file": "integrations.md" },
+        { "id": "mail", "title": "How mail is checked", "file": "mail.md" }
+      ]
+    },
+    {
+      "title": "Building tasks",
+      "sections": [
+        { "id": "tasks", "title": "Tasks", "file": "tasks.md" },
+        { "id": "steps", "title": "Step reference", "file": "steps.md" },
+        { "id": "step-options", "title": "Step options", "file": "step-options.md" },
+        { "id": "placeholders", "title": "Placeholders and templates", "file": "placeholders.md" },
+        { "id": "chains", "title": "Task chains", "file": "chains.md" },
+        { "id": "ai", "title": "AI steps", "file": "ai.md" }
+      ]
+    },
+    {
+      "title": "Results",
+      "sections": [
+        { "id": "activity", "title": "Dashboard and run log", "file": "activity.md" },
+        { "id": "usage", "title": "Usage and cost", "file": "usage.md" }
+      ]
+    },
+    {
+      "title": "More",
+      "sections": [
+        { "id": "admin", "title": "Users and admin", "file": "admin.md" },
+        { "id": "privacy", "title": "Security and privacy", "file": "privacy.md" },
+        { "id": "troubleshooting", "title": "Troubleshooting and FAQ", "file": "troubleshooting.md" }
       ]
     }
   ]

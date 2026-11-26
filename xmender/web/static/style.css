@@ -434,7 +434,7 @@ a.docs-brand .muted { font-size: 0.85rem; }
 .docs-page-body .docs-content { min-height: 60vh; }
 
 @media (max-width: 760px) {
-  .docs { grid-template-columns: 1fr; }
+  .docs { grid-template-columns: minmax(0, 1fr); }
   .docs-side { border-right: none; border-bottom: 1px solid var(--faint); padding: 0 0 8px; max-height: 32vh; overflow-y: auto; }
   .docs-page-body .docs-side { position: static; max-height: 40vh; }
   .docs-content { padding: 14px 0 32px; }
@@ -445,3 +445,5 @@ a.docs-brand .muted { font-size: 0.85rem; }
 .tpl-docs { margin-top: 8px; }
 .tpl-docs svg, .nav-docs svg { width: 14px; height: 14px; }
 .nav .nav-docs svg { width: 16px; height: 16px; }
+a.docs-toc-item.sub.l3 { padding-left: 18px; font-size: 0.7rem; }
+.docs-table td:first-child code { white-space: nowrap; }

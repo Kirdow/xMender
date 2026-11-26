@@ -37,7 +37,9 @@ const XDocs = (() => {
 
   const LIST_RE = /^([-*]|\d+\.)\s+(.*)$/;
   const isBlockStart = (l) => /^(#{1,4}\s|```|>|\|)/.test(l) || LIST_RE.test(l);
-  const cells = (l) => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+  // Table cells split on unescaped "|"; write "\|" for a literal pipe.
+  const cells = (l) => l.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '').split(/(?<!\\)\|/)
+    .map((c) => c.trim().replace(/\\\|/g, '|'));
 
   function parseBlocks(md) {
     const lines = md.replace(/\r\n?/g, '\n').split('\n');
@@ -132,7 +134,8 @@ const XDocs = (() => {
     const blocks = parseBlocks(md);
     const h1 = blocks.find((b) => b.t === 'h' && b.level === 1);
     const title = h1 ? plainInline(parseInline(h1.text)) : meta.title;
-    const headings = blocks.filter((b) => b.t === 'h' && b.level === 2).map((b) => ({ id: b.id, text: plainInline(parseInline(b.text)) }));
+    const headings = blocks.filter((b) => b.t === 'h' && (b.level === 2 || b.level === 3))
+      .map((b) => ({ id: b.id, level: b.level, text: plainInline(parseInline(b.text)) }));
     const chunks = [];
     let cur = { anchor: null, heading: title, blocks: [] };
     for (const b of blocks) {
@@ -240,7 +243,7 @@ const XDocs = (() => {
         data.sections.filter((s) => s.group === g).map((s) => [
           docLink(s.id, s.title, 'docs-toc-item' + (s === active ? ' active' : '')),
           s === active && s.headings.length ? el('div', { class: 'docs-toc-sub' },
-            s.headings.map((hd) => docLink(`${s.id}/${hd.id}`, hd.text, 'docs-toc-item sub'))) : null,
+            s.headings.map((hd) => docLink(`${s.id}/${hd.id}`, hd.text, `docs-toc-item sub${hd.level === 3 ? ' l3' : ''}`))) : null,
         ]))));
     }
 
