@@ -313,3 +313,48 @@ def test_conditions():
     # a step that never ran has no outputs
     assert not pipeline.condition_holds({"step": "zz", "op": "matched"}, st)
     assert not pipeline.condition_holds({"step": "zz", "op": "not_matched"}, st)
+
+
+def test_filter_regex_mode():
+    cfg = filters.normalize_config({"regex": True, "subject": r"invoice\s*#\d+", "from": r"@shop\.com>$",
+                                    "not_words": r"\bspam\b"})
+    assert filters.matches(cfg, make_mail())[0]
+    assert not filters.matches(cfg, make_mail(subject="Invoice pending"))[0]
+    assert not filters.matches(cfg, make_mail(body="this is spam"))[0]
+    # without regex mode the same text is a literal substring
+    plain = filters.normalize_config({"subject": r"invoice\s"})
+    assert not filters.matches(plain, make_mail())[0]
+    with pytest.raises(ValueError, match="invalid regular expression"):
+        filters.normalize_config({"regex": True, "subject": "(unclosed"})
+    with pytest.raises(pipeline.StepConfigError, match="Step 1: invalid regular"):
+        _v([{"type": "filter_builtin", "config": {"regex": True, "subject": "[x"}}])
+
+
+def test_filter_regex_timeout(monkeypatch):
+    monkeypatch.setattr(filters, "REGEX_TIMEOUT", 0.01)
+    cfg = filters.normalize_config({"regex": True, "has_words": r"(a|aa)+$"})
+    with pytest.raises(filters.FilterError, match="took too long"):
+        filters.matches(cfg, make_mail(body="a" * 40 + "!"))
+    steps = _v([{"type": "filter_builtin", "config": {"regex": True, "has_words": r"(a|aa)+$"}}])
+    res = pipeline.run_task(steps, make_mail(body="a" * 40 + "!"), pipeline.RunContext(None, None))
+    assert res.status == "error" and "took too long" in res.log[0]["detail"]
+
+
+def test_filter_attachment_detail():
+    pdf = gmail.Attachment("Invoice-42.PDF", "application/pdf", 300 * 1024)
+    png = gmail.Attachment("logo.png", "image/png", 2 * 1024)
+    mail = make_mail(attachments=[png, pdf])
+    ok = lambda **c: filters.matches(filters.normalize_config(c), mail)[0]  # noqa: E731
+    assert ok(attachment_ext=".pdf, docx")
+    assert ok(attachment_name="invoice*")
+    assert ok(attachment_type="image/")
+    assert ok(attachment_ext="pdf", attachment_min_kb=100)
+    # all criteria must hold for the same attachment
+    assert not ok(attachment_ext="png", attachment_min_kb=100)
+    assert not ok(attachment_max_kb=1)
+    assert not filters.matches(filters.normalize_config({"attachment_ext": "pdf"}), make_mail())[0]
+    assert not filters.is_empty(filters.normalize_config({"attachment_min_kb": 0}))
+    for bad in ({"attachment_min_kb": "x"}, {"attachment_min_kb": 5, "attachment_max_kb": 1},
+                {"has_attachment": False, "attachment_ext": "pdf"}):
+        with pytest.raises(ValueError):
+            filters.normalize_config(bad)

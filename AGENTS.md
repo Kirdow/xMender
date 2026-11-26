@@ -126,7 +126,7 @@ blocks deleting them).
 
 | type | group | behaviour |
 |---|---|---|
-| `filter_builtin` | filter | `services/filters.py`, Gmail-like fields |
+| `filter_builtin` | filter | `services/filters.py`, Gmail-like fields; optional regex mode (`regex` package, per-search timeout) and attachment details |
 | `filter_agent` | filter | LLM verdict; matches only if the reply ends with exactly `FILTER MATCH` |
 | `webhook_agent` | action | LLM writes the text; posted as an embed titled `xMender Notification`, colour `0x00FFFF` |
 

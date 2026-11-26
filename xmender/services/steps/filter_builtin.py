@@ -6,11 +6,16 @@ from typing import Any
 
 from .. import filters
 from ..gmail import ParsedEmail
-from .base import Result, RunContext, RunState, StepConfigError, StepDef, ValidateContext
+from .base import (
+    Result, RunContext, RunState, StepConfigError, StepDef, StepError, ValidateContext,
+)
 
 
 def _validate(cfg: dict[str, Any], vctx: ValidateContext) -> dict[str, Any]:
-    norm = filters.normalize_config(cfg)
+    try:
+        norm = filters.normalize_config(cfg)
+    except ValueError as e:
+        raise StepConfigError(str(e)) from e
     if filters.is_empty(norm):
         raise StepConfigError("set at least one filter criterion.")
     return norm
@@ -18,7 +23,10 @@ def _validate(cfg: dict[str, Any], vctx: ValidateContext) -> dict[str, Any]:
 
 def _run(cfg: dict[str, Any], mail: ParsedEmail, ctx: RunContext, state: RunState,
          entry: dict[str, Any]) -> Result:
-    ok, reason = filters.matches(cfg, mail)
+    try:
+        ok, reason = filters.matches(cfg, mail)
+    except filters.FilterError as e:
+        raise StepError(str(e)) from e
     return Result(matched=ok, detail=reason)
 
 

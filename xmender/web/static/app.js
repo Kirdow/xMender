@@ -570,7 +570,8 @@ async function viewTasks(main, rest) {
 
 const GROUP_CHIP = { filter: 'aqua', agent: 'lime', action: 'pink' };
 const STEP_DEFAULTS = {
-  filter_builtin: () => ({ from: '', to: '', subject: '', has_words: '', not_words: '', has_attachment: null }),
+  filter_builtin: () => ({ from: '', to: '', subject: '', has_words: '', not_words: '', regex: false, has_attachment: null,
+    attachment_ext: '', attachment_name: '', attachment_type: '', attachment_min_kb: null, attachment_max_kb: null }),
   filter_agent: () => ({ instructions: '', model: null }),
   webhook_agent: () => ({ instructions: '', model: null, discord_integration_id: null }),
 };
@@ -621,9 +622,28 @@ function instructionsField(c, placeholder, hint) {
 
 const STEP_FORMS = {
   filter_builtin(c) {
+    const kb = (v) => (v.trim() === '' ? null : Number(v));
+    const details = h('div', { class: 'att-details' },
+      h('div', { class: 'grid-2' },
+        field('File types', bindIn(c, 'attachment_ext', h('input', { type: 'text', value: c.attachment_ext || '', placeholder: 'pdf, docx' }))),
+        field('File name', bindIn(c, 'attachment_name', h('input', { type: 'text', value: c.attachment_name || '', placeholder: 'invoice*, receipt-*.pdf' })))),
+      h('div', { class: 'grid-3' },
+        field('Content type', bindIn(c, 'attachment_type', h('input', { type: 'text', value: c.attachment_type || '', placeholder: 'image/, application/pdf' }))),
+        field('Min size (KB)', bindIn(c, 'attachment_min_kb', h('input', { type: 'number', min: 0, value: c.attachment_min_kb ?? '' }), kb)),
+        field('Max size (KB)', bindIn(c, 'attachment_max_kb', h('input', { type: 'number', min: 0, value: c.attachment_max_kb ?? '' }), kb))),
+      h('div', { class: 'hint' }, 'Optional. At least one attachment must match every detail you fill in. Several values: separate with ",".'));
     const att = h('select', {}, h('option', { value: '' }, 'Either'), h('option', { value: 'yes' }, 'Has attachment'), h('option', { value: 'no' }, 'No attachment'));
     att.value = c.has_attachment === true ? 'yes' : c.has_attachment === false ? 'no' : '';
-    att.addEventListener('change', () => { c.has_attachment = att.value === 'yes' ? true : att.value === 'no' ? false : null; });
+    const syncAtt = () => details.classList.toggle('hidden', att.value === 'no');
+    att.addEventListener('change', () => { c.has_attachment = att.value === 'yes' ? true : att.value === 'no' ? false : null; syncAtt(); });
+    syncAtt();
+    const hint = h('div', { class: 'hint gap' });
+    const syncHint = () => {
+      hint.textContent = c.regex
+        ? 'Regex mode: each text field is one case-insensitive regular expression, searched anywhere in the field (use | for alternatives).'
+        : 'Case-insensitive. From/To/Subject: any of several values separated by "," or " OR ". Words: all must appear; use "quotes" for phrases.';
+    };
+    syncHint();
     return [
       h('div', { class: 'grid-2' },
         field('From', bindIn(c, 'from', h('input', { type: 'text', value: c.from || '', placeholder: 'billing@, shop.com' }))),
@@ -632,8 +652,11 @@ const STEP_FORMS = {
       h('div', { class: 'grid-2' },
         field('Has the words', bindIn(c, 'has_words', h('input', { type: 'text', value: c.has_words || '', placeholder: 'order "shipped"' }))),
         field("Doesn't have", bindIn(c, 'not_words', h('input', { type: 'text', value: c.not_words || '' })))),
+      h('label', { class: 'check mb' }, h('input', { type: 'checkbox', checked: !!c.regex, onchange: (e) => { c.regex = e.target.checked; syncHint(); } }),
+        'Use regular expressions'),
+      hint,
       field('Attachment', att),
-      h('div', { class: 'hint' }, 'Case-insensitive. From/To/Subject: any of several values separated by "," or " OR ". Words: all must appear; use "quotes" for phrases.'),
+      details,
     ];
   },
   filter_agent(c, env) {

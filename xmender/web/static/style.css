@@ -81,7 +81,8 @@ select option { background: var(--panel); }
 .check { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--fg); cursor: pointer; margin: 0; }
 .check input { accent-color: var(--primary); width: 16px; height: 16px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
-@media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 12px; }
+@media (max-width: 640px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
 
 /* ── Buttons ── */
 button, .btn {
@@ -232,6 +233,10 @@ pre.response {
 .step-opts summary { cursor: pointer; font-size: 0.78rem; color: var(--fg); user-select: none; }
 .step-opts summary .muted { font-size: 0.72rem; }
 .step-opts[open] summary { margin-bottom: 10px; }
+.att-details { margin: -4px 0 0 0; padding: 10px 12px 2px; border: 1px dashed var(--faint); border-radius: 8px; }
+.att-details .hint { margin: -6px 0 10px; }
+.check.mb { margin-bottom: 4px; }
+.hint.gap { margin-bottom: 14px; }
 .when-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .when-row select, .when-row input { width: auto; flex: 1 1 140px; }
 .step-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 8px; }
