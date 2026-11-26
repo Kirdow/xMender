@@ -43,6 +43,7 @@ const ICONS = {
   tasks: ['M9 6h11', 'M9 12h11', 'M9 18h11', 'M4 6l1 1 2-2', 'M4 12l1 1 2-2', 'M4 18l1 1 2-2'],
   integrations: ['M8 12h8', 'M6 8a4 4 0 0 0 0 8h2', 'M18 8a4 4 0 0 1 0 8h-2'],
   settings: ['M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.8 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.8-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 15.4H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6V4.5a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.8 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.8h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z'],
+  usage: ['M3 3v18h18', 'M7 16v-4', 'M12 16V8', 'M17 16v-7'],
   admin: ['M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z', 'M9 12l2 2 4-4'],
   logout: ['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'M16 17l5-5-5-5', 'M21 12H9'],
   refresh: ['M21 12a9 9 0 1 1-2.6-6.4', 'M21 3v6h-6'],
@@ -166,6 +167,7 @@ const ROUTES = [
   { path: 'dashboard', label: 'Dashboard', icon: 'dashboard', view: viewDashboard },
   { path: 'tasks', label: 'Tasks', icon: 'tasks', view: viewTasks, perm: 'tasks' },
   { path: 'integrations', label: 'Integrations', icon: 'integrations', view: viewIntegrations, perm: 'integrations' },
+  { path: 'usage', label: 'Usage', icon: 'usage', view: viewUsage },
   { path: 'settings', label: 'Settings', icon: 'settings', view: viewSettings },
   { path: 'admin', label: 'Admin', icon: 'admin', view: viewAdmin, admin: true },
 ];
@@ -1201,7 +1203,6 @@ async function viewSettings(main) {
     } catch (e) { toast(e.message, 'err'); }
   }) }, 'Change password');
 
-  const usageBox = h('div', {});
   const tz = zoneSelect(S.me.timezone || browserZone());
   const tzBtn = h('button', { class: 'primary', onclick: () => withBusy(tzBtn, async () => {
     try {
@@ -1217,8 +1218,6 @@ async function viewSettings(main) {
     h('div', { class: 'card' },
       field('Your time zone', tz, `Used by time-window filters unless a step sets its own. Your browser reports ${browserZone()}.`),
       tzBtn),
-    h('h2', {}, h('span', { class: 'dot lime' }), 'API usage'),
-    usageBox,
     h('h2', {}, h('span', { class: 'dot' }), 'Password'),
     h('div', { class: 'card' }, field('Current password', cur), h('div', { class: 'grid-2' }, field('New password', pw, 'At least 10 characters.'), field('Repeat', pw2)), pwBtn));
 
@@ -1243,6 +1242,13 @@ async function viewSettings(main) {
       h('div', { class: 'btn-row' }, save, h('button', { class: 'ghost', onclick: () => drawModels(true) }, icon(ICONS.refresh), 'Reload list')));
   }
   drawModels(false);
+}
+
+// ── Usage ───────────────────────────────────────────────────────────────────
+
+function viewUsage(main) {
+  const usageBox = h('div', {});
+  page(main, 'Usage', 'Anthropic API tokens and cost.', null, usageBox);
   drawUsage(usageBox);
 }
 

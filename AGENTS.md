@@ -240,7 +240,7 @@ Each step appends a log entry to `TaskRun.log` with these fields: `step`,
   price is unknown), so price changes never rewrite history. Never use floats
   for money server-side.
 - `GET /api/usage?period=&tz=&scope=` summarises by model, task and day in the
-  viewer's time zone; `scope=all` is admin-only. The Settings page shows it.
+  viewer's time zone; `scope=all` is admin-only. The Usage page shows it.
 - Any new code path that calls `llm.complete()` must record its usage too.
 
 ### Prompt-injection hardening (`services/prompts.py`)
