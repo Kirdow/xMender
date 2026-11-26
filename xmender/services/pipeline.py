@@ -87,16 +87,19 @@ def _validate_when(raw: Any, outputs: dict[str, set[str]]) -> dict[str, Any] | N
 
 def validate_steps(
     steps: Any, *, discord_ids: set[int], model_ids: set[str] | None,
-    http_ids: set[int] | None = None,
+    http_ids: set[int] | None = None, inherited: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Normalise a task's step list. `model_ids` is None when the provider's
     model list is unavailable; explicit models are then only checked at run
-    time."""
+    time. `inherited` holds the named outputs of the tasks this one is
+    chained after."""
     if not isinstance(steps, list) or not steps:
         raise StepConfigError("A task needs at least one step.")
     if len(steps) > MAX_STEPS:
         raise StepConfigError(f"A task can have at most {MAX_STEPS} steps.")
     vctx = ValidateContext(discord_ids=discord_ids, model_ids=model_ids, http_ids=set(http_ids or ()))
+    vctx.outputs.update(inherited or {})
+    vctx.inherited = set(inherited or ())
     out: list[dict[str, Any]] = []
     for i, step in enumerate(steps, 1):
         try:
@@ -122,6 +125,8 @@ def _validate_step(step: Any, vctx: ValidateContext) -> dict[str, Any]:
                 "a step name must start with a letter and use only a-z, 0-9 and _ "
                 "(at most 32 characters)."
             )
+        if name in vctx.inherited:
+            raise StepConfigError(f"the name `{name}` is already used by an earlier task in the chain.")
         if name in RESERVED_NAMES or name in vctx.outputs:
             raise StepConfigError(f"the name `{name}` is already used.")
         norm["name"] = name
@@ -223,8 +228,13 @@ class RunResult:
     vars: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
-def run_task(steps: list[dict[str, Any]], mail: ParsedEmail, ctx: RunContext) -> RunResult:
-    state = RunState()
+def run_task(
+    steps: list[dict[str, Any]], mail: ParsedEmail, ctx: RunContext,
+    inherited: dict[str, dict[str, Any]] | None = None,
+) -> RunResult:
+    """Run one task. `inherited` are the step outputs of the task it is chained
+    after; the result's `vars` include them, so they pass down a chain."""
+    state = RunState(vars=dict(inherited or {}))
     status = _run_steps(steps, mail, ctx, state, log := [])
     return RunResult(status, log, usage=state.usage, vars=state.vars)
 

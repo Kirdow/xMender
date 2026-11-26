@@ -221,7 +221,7 @@ function ensureTimezone() {
 
 function route() {
   ensureTimezone();
-  const [name, ...rest] = location.hash.replace(/^#\/?/, '').split('/');
+  const [name, ...rest] = location.hash.replace(/^#\/?/, '').split('?')[0].split('/');
   const r = ROUTES.find((x) => x.path === name && allowed(x)) || ROUTES[0];
   if (r.path !== name) { history.replaceState(null, '', '#/' + r.path); }
   const main = h('main', { class: 'main' });
@@ -326,7 +326,7 @@ function renderRegister() {
 
 // ── Dashboard ───────────────────────────────────────────────────────────────
 
-const STATUS_CHIP = { completed: 'lime', partial: 'pink', stopped: '', error: 'red' };
+const STATUS_CHIP = { completed: 'lime', partial: 'pink', stopped: '', skipped: '', error: 'red' };
 const OUTCOME_CHIP = { pass: 'aqua', 'no-match': 'pink', stop: '', skip: '', sent: 'lime', error: 'red' };
 
 async function viewDashboard(main) {
@@ -370,7 +370,7 @@ function mailCard(m) {
   const log = h('div', { class: 'runlog hidden' }, m.runs.length ? m.runs.map((r) => h('div', { class: 'run' },
     h('div', { class: 'run-name' }, r.task_name, ' ', h('span', { class: `chip ${STATUS_CHIP[r.status] || ''}` }, r.status)),
     r.log.map((s) => [
-      h('div', { class: 'step-line' }, h('span', { class: 'n' }, s.step + '.'),
+      h('div', { class: 'step-line' }, h('span', { class: 'n' }, s.step ? s.step + '.' : '↳'),
         h('span', {}, s.label), h('span', { class: `chip ${OUTCOME_CHIP[s.outcome] || ''}` }, s.outcome || '?'),
         h('span', { class: 'detail' }, s.detail || '', s.model ? ` · ${s.model}` : '', s.attachments ? ` · read ${s.attachments.join(', ')}` : '', s.warning ? ` · ${s.warning}` : '',
           s.usage ? h('span', { title: exactUsd(s.usage.cost_nanousd) }, ` · ${fmtNum(s.usage.input_tokens)} in / ${fmtNum(s.usage.output_tokens)} out · ${fmtUsd(s.usage.cost_nanousd)}`) : null)),
@@ -687,12 +687,18 @@ async function viewTasks(main, rest) {
   const newBtn = h('button', { class: 'primary', onclick: () => { location.hash = '#/tasks/new'; } }, '+ New task');
   if (!meta.gmail.length) newBtn.disabled = true;
 
-  page(main, 'Tasks', 'Each new email runs through every enabled task of its inbox, step by step. A filter that does not match ends the chain unless it is set to continue.', newBtn,
+  const byId = Object.fromEntries(data.tasks.map((t) => [t.id, t]));
+  const statusLabel = Object.fromEntries(meta.chain_statuses.map((s) => [s.key, s.label]));
+  page(main, 'Tasks', 'Each new email runs through every enabled task of its inbox, step by step. A filter that does not match ends the task unless it is set to continue. A task can run after another one, depending on how that one ended.', newBtn,
     !meta.gmail.length ? h('div', { class: 'callout aqua' }, 'Connect a Gmail inbox first. ', can('integrations') ? h('a', { href: '#/integrations' }, 'Go to Integrations') : null) : null,
-    data.tasks.length ? data.tasks.map((t) => h('div', { class: 'card accent-' + (t.enabled ? 'lime' : 'aqua') },
+    data.tasks.length ? chainOrder(data.tasks).map(({ task: t, depth }) => h('div', { class: `card accent-${t.enabled ? 'lime' : 'aqua'}${depth ? ' chained depth-' + Math.min(depth, 4) : ''}` },
       h('div', { class: 'card-head' },
         h('div', {}, h('div', { class: 'card-title' }, t.name),
-          h('div', { class: 'card-sub' }, inbox[t.gmail_integration_id] ? inbox[t.gmail_integration_id].email : 'unknown inbox')),
+          h('div', { class: 'card-sub' }, inbox[t.gmail_integration_id] ? inbox[t.gmail_integration_id].email : 'unknown inbox'),
+          t.depends_on && byId[t.depends_on.task_id] ? h('div', { class: 'card-sub chain-line' }, '↳ after ',
+            h('span', { class: 'chip-name' }, byId[t.depends_on.task_id].name),
+            ' ' + listOr(t.depends_on.status.map((k) => statusLabel[k] || k)),
+            byId[t.depends_on.task_id].enabled ? null : h('span', { class: 'chip pink' }, 'paused')) : null),
         h('div', { class: 'btn-row' },
           switchEl(t.enabled, async (on, input) => {
             input.disabled = true;
@@ -700,14 +706,55 @@ async function viewTasks(main, rest) {
             catch (e) { input.checked = !on; toast(e.message, 'err'); }
             input.disabled = false;
           }, 'Enabled'),
+          h('button', { class: 'small', title: 'New task that runs after this one', onclick: () => { location.hash = `#/tasks/new?after=${t.id}`; } }, '+ Then'),
           h('button', { class: 'small', onclick: () => { location.hash = `#/tasks/${t.id}`; } }, 'Edit'),
           h('button', { class: 'small danger', onclick: async () => {
+            if (data.tasks.some((x) => x.depends_on && x.depends_on.task_id === t.id)) { toast('Other tasks run after this one. Change or delete them first.', 'err'); return; }
             if (!(await confirmDialog('Delete task', `Delete "${t.name}"? Past activity stays visible.`, 'Delete', true))) return;
             try { await api('DELETE', `/api/tasks/${t.id}`); toast('Task deleted.', 'ok'); viewTasks(main, []); } catch (e) { toast(e.message, 'err'); }
           } }, 'Delete'))),
       h('div', { class: 'chips' }, t.steps.map((s, i) => h('span', { class: 'chip ' + (GROUP_CHIP[group[s.type]] || '') }, `${i + 1}. ${label[s.type] || s.type}`)))))
       : h('div', { class: 'empty' }, 'No tasks yet.'));
 }
+
+// Tasks with chained ones right below their parent, as {task, depth}.
+function chainOrder(tasks) {
+  const ids = new Set(tasks.map((t) => t.id));
+  const parentOf = (t) => (t.depends_on && ids.has(t.depends_on.task_id) ? t.depends_on.task_id : null);
+  const out = [];
+  const seen = new Set();
+  const visit = (t, depth) => {
+    if (seen.has(t.id)) return;
+    seen.add(t.id);
+    out.push({ task: t, depth });
+    tasks.filter((x) => parentOf(x) === t.id).forEach((x) => visit(x, depth + 1));
+  };
+  tasks.filter((t) => parentOf(t) === null).forEach((t) => visit(t, 0));
+  tasks.forEach((t) => visit(t, 0)); // anything left (should not happen: loops are refused)
+  return out;
+}
+
+// Named steps of the tasks a chained task runs after, oldest ancestor first.
+function chainSteps(tasks, parentId) {
+  const byId = Object.fromEntries(tasks.map((t) => [t.id, t]));
+  const chain = [];
+  for (let cur = byId[parentId]; cur && !chain.includes(cur); cur = cur.depends_on && byId[cur.depends_on.task_id]) chain.push(cur);
+  const out = new Map();
+  for (const t of chain.reverse()) for (const s of t.steps) if (s.name) out.set(s.name, { ...s, fromTask: t.name });
+  return [...out.values()];
+}
+
+function chainDescendants(tasks, id) {
+  const out = new Set([id]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const t of tasks) if (t.depends_on && out.has(t.depends_on.task_id) && !out.has(t.id)) { out.add(t.id); grew = true; }
+  }
+  return out;
+}
+
+function listOr(items) { return items.length > 1 ? items.slice(0, -1).join(', ') + ' or ' + items[items.length - 1] : items[0] || ''; }
 
 const GROUP_CHIP = { filter: 'aqua', agent: 'lime', action: 'pink' };
 const STEP_DEFAULTS = {
@@ -749,7 +796,7 @@ const EMAIL_FIELDS = ['from', 'from_name', 'from_addr', 'to', 'cc', 'subject', '
 // Clickable placeholders for template fields. Inserts into the template
 // field that last had focus.
 function templateHelp(env) {
-  const prior = env.task.steps.slice(0, env.idx).filter((s) => s.name);
+  const prior = [...env.inherited, ...env.task.steps.slice(0, env.idx).filter((s) => s.name)];
   const vars = [...EMAIL_FIELDS.map((f) => `email.${f}`),
     ...prior.flatMap((s) => stepOutputs(s, env).map((f) => `${s.name}.${f}`))];
   const insert = (v) => {
@@ -765,7 +812,7 @@ function templateHelp(env) {
   return h('details', { class: 'tpl-help' },
     h('summary', {}, 'Placeholders'),
     h('div', { class: 'chips' }, vars.map((v) => h('button', { type: 'button', class: 'chip', onclick: () => insert(v) }, v))),
-    h('div', { class: 'hint' }, 'Write {{step.field}} to insert a value. Modifiers: {{email.body | clip:500}}, {{x.y | default:none}}, | oneline, | upper, | lower. Name an earlier step to use its outputs.'));
+    h('div', { class: 'hint' }, 'Write {{step.field}} to insert a value. Modifiers: {{email.body | clip:500}}, {{x.y | default:none}}, | oneline, | upper, | lower. Name an earlier step to use its outputs; a chained task can also use the named steps of the tasks it runs after.'));
 }
 
 function templateInput(c, key, env, multiline, placeholder) {
@@ -1052,10 +1099,10 @@ const STEP_FORMS = {
 
 // "Run this step" condition on an earlier named step's output.
 function whenField(step, idx, env) {
-  const prior = env.task.steps.slice(0, idx).filter((s) => s.name);
+  const prior = [...env.inherited, ...env.task.steps.slice(0, idx).filter((s) => s.name)];
   const box = h('div', { class: 'when-row' });
   const stepSel = h('select', {}, h('option', { value: '' }, 'Always'),
-    prior.map((s) => h('option', { value: s.name }, `Only if ${s.name}…`)));
+    prior.map((s) => h('option', { value: s.name }, s.fromTask ? `Only if ${s.name} (from ${s.fromTask})…` : `Only if ${s.name}…`)));
   stepSel.value = step.when && prior.some((s) => s.name === step.when.step) ? step.when.step : '';
 
   function draw() {
@@ -1150,24 +1197,31 @@ function stepOptions(step, idx, env) {
 }
 
 async function viewTaskEditor(main, id) {
-  let meta, task, models = { models: [] };
+  let meta, task, allTasks, models = { models: [] };
   try {
     meta = await api('GET', '/api/tasks/meta');
+    allTasks = (await api('GET', '/api/tasks')).tasks;
     if (id !== 'new') {
-      const all = await api('GET', '/api/tasks');
-      task = all.tasks.find((t) => String(t.id) === id);
+      task = allTasks.find((t) => String(t.id) === id);
       if (!task) throw new Error('Task not found.');
     }
     if (meta.has_anthropic) models = await getModels();
   } catch (e) { toast(e.message, 'err'); location.hash = '#/tasks'; return; }
 
-  task = task ? structuredClone(task) : { name: '', enabled: true, gmail_integration_id: meta.gmail[0] && meta.gmail[0].id, steps: [] };
+  // "#/tasks/new?after=ID" starts a task chained after ID.
+  const after = allTasks.find((t) => String(t.id) === new URLSearchParams(location.hash.split('?')[1] || '').get('after'));
+  task = task ? structuredClone(task) : {
+    name: '', enabled: true, steps: [],
+    gmail_integration_id: after ? after.gmail_integration_id : meta.gmail[0] && meta.gmail[0].id,
+    depends_on: after ? { task_id: after.id, status: ['completed'] } : null,
+  };
   const label = Object.fromEntries(meta.step_types.map((s) => [s.type, s.label]));
   const env = {
     meta, models, task,
     groupOf: Object.fromEntries(meta.step_types.map((s) => [s.type, s.group])),
     defaultLabel: meta.default_model ? `Default (${meta.default_model})` : 'Default (none set in Settings)',
     open: new WeakSet(),
+    inherited: [],
     redraw: () => drawSteps(),
   };
 
@@ -1176,6 +1230,33 @@ async function viewTaskEditor(main, id) {
   inbox.value = task.gmail_integration_id || '';
   const enabled = h('input', { type: 'checkbox', checked: task.enabled });
   const stepsBox = h('div', {});
+
+  // Chain: run after another task of the same inbox.
+  const blocked = task.id ? chainDescendants(allTasks, task.id) : new Set();
+  const parentSel = h('select', {});
+  const statusBox = h('div', {});
+  const chainHint = h('div', { class: 'hint' });
+  function drawChain() {
+    const opts = allTasks.filter((t) => !blocked.has(t.id) && t.gmail_integration_id === Number(inbox.value));
+    parentSel.replaceChildren(h('option', { value: '' }, 'No, runs on its own'),
+      ...opts.map((t) => h('option', { value: t.id }, t.name + (t.enabled ? '' : ' (paused)'))));
+    if (task.depends_on && !opts.some((t) => t.id === task.depends_on.task_id)) task.depends_on = null;
+    parentSel.value = task.depends_on ? task.depends_on.task_id : '';
+    statusBox.replaceChildren(...(task.depends_on ? [field('Only when it', checkList(meta.chain_statuses, task.depends_on, 'status'),
+      '“Did not run” covers a paused task, or one whose own run-after condition was not met.')] : []));
+    env.inherited = task.depends_on ? chainSteps(allTasks, task.depends_on.task_id) : [];
+    chainHint.textContent = !opts.length ? 'No other task uses this inbox yet.'
+      : task.depends_on ? (env.inherited.length ? `Steps can use the named steps of the earlier task: ${env.inherited.map((s) => s.name).join(', ')}.` : 'Name steps in the earlier task to use their results here.')
+        : 'Run this task only after another task of the same inbox, depending on how it ended.';
+  }
+  parentSel.addEventListener('change', () => {
+    task.depends_on = parentSel.value ? { task_id: Number(parentSel.value), status: (task.depends_on && task.depends_on.status) || ['completed'] } : null;
+    drawChain();
+    drawSteps();
+  });
+  inbox.addEventListener('change', () => { drawChain(); drawSteps(); });
+  drawChain();
+  const chainSec = h('div', {}, field('Run after another task', parentSel), chainHint);
   const err = h('p', { class: 'error-box hidden' });
 
   function stepForm(step, idx) {
@@ -1204,7 +1285,8 @@ async function viewTaskEditor(main, id) {
   function uniqueName(type) {
     const base = STEP_NAME_BASE[type] || type;
     let n = 1;
-    while (task.steps.some((s) => s.name === (n === 1 ? base : base + n))) n++;
+    const taken = (nm) => task.steps.some((s) => s.name === nm) || env.inherited.some((s) => s.name === nm);
+    while (taken(n === 1 ? base : base + n)) n++;
     return n === 1 ? base : base + n;
   }
 
@@ -1218,7 +1300,7 @@ async function viewTaskEditor(main, id) {
     g.items.map((s) => h('option', { value: s.type }, s.label)))));
   const saveBtn = h('button', { class: 'primary', onclick: () => withBusy(saveBtn, async () => {
     err.classList.add('hidden');
-    const body = { name: name.value, gmail_integration_id: Number(inbox.value), enabled: enabled.checked, steps: task.steps };
+    const body = { name: name.value, gmail_integration_id: Number(inbox.value), enabled: enabled.checked, steps: task.steps, depends_on: task.depends_on };
     try {
       if (id === 'new') await api('POST', '/api/tasks', body); else await api('PUT', `/api/tasks/${id}`, body);
       toast('Task saved.', 'ok');
@@ -1232,6 +1314,7 @@ async function viewTaskEditor(main, id) {
     !meta.has_anthropic ? h('div', { class: 'callout' }, 'Agent steps need the Anthropic integration. ', can('integrations') ? h('a', { href: '#/integrations' }, 'Connect it') : null) : null,
     h('div', { class: 'card' },
       h('div', { class: 'grid-2' }, field('Name', name), field('Inbox', inbox)),
+      h('div', { class: 'grid-2' }, chainSec, statusBox),
       h('label', { class: 'check' }, enabled, 'Enabled')),
     h('h2', {}, h('span', { class: 'dot' }), 'Steps'),
     stepsBox,

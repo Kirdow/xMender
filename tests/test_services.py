@@ -889,3 +889,21 @@ def test_mask_email():
     assert mask_email("ab@x.com") == "**@x.com"
     assert mask_email("") == "" and mask_email(None) == ""
     assert key_prefix("sk-ant-…abcd") == "sk-ant-" and key_prefix("••••") == ""
+
+
+def test_chain_order_and_inheritance():
+    from xmender.services import chains
+
+    step = {"type": "filter_builtin", "name": "inv", "config": {}}
+    nodes = {
+        1: chains.Node(1, "child", 9, [], parent_id=3),
+        2: chains.Node(2, "solo", 9, []),
+        3: chains.Node(3, "parent", 9, [step]),
+    }
+    assert [n.id for n in chains.order(nodes.values())] == [3, 1, 2]
+    assert chains.inherited_outputs(3, nodes) == {"inv": {"matched"}}
+    assert [n.id for n in chains.descendants(3, nodes)] == [1]
+    with pytest.raises(pipeline.StepConfigError):
+        chains.validate({"task_id": 1}, 3, 9, nodes)  # 3 -> 1 -> 3
+    assert chains.validate({"task_id": 3, "status": ["error", "completed"]}, None, 9, nodes) == (
+        3, ["completed", "error"])

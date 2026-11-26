@@ -123,6 +123,14 @@ templates (`{{category.label}}`, `{{extract.amount}}`, `{{email.subject}}`)
 and in **run-if conditions** ("only if `category` label equals invoice"),
 which is how a task branches. Steps can also continue on error.
 
+Tasks can be **chained**: "Run after another task" makes a task run only after
+another task of the same inbox ended a chosen way (completed, completed with
+errors, stopped by a filter, failed, or did not run). A chained task can use
+the named steps of the tasks before it, so one task can classify and two
+others act on "completed" and "stopped" as an if/else. Use **+ Then** on a
+task to start one chained after it. A task with chained tasks cannot be
+deleted, and edits that would break them are refused.
+
 Agent steps use the step's model or your default model (Settings) and can
 optionally read the email's PDF and image attachments. Prompts wrap the email
 and your instructions in per-call random tags, mark the email (and its

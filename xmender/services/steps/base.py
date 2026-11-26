@@ -65,6 +65,8 @@ class ValidateContext:
     http_ids: set[int] = field(default_factory=set)
     # Named earlier steps -> the fields they output.
     outputs: dict[str, set[str]] = field(default_factory=dict)
+    # Names that come from earlier tasks in a chain.
+    inherited: set[str] = field(default_factory=set)
 
 
 @dataclass

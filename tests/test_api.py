@@ -173,7 +173,7 @@ def test_poller_passes_sender_history(admin, monkeypatch):
     monkeypatch.setattr(gmail, "fetch_new", lambda acct, v, last, limit: gmail.FetchResult(
         uidvalidity=5, last_uid=last, messages=[(102, msg.as_bytes())]))
     seen = []
-    monkeypatch.setattr(pipeline, "run_task", lambda steps, mail, ctx: (
+    monkeypatch.setattr(pipeline, "run_task", lambda steps, mail, ctx, **kw: (
         seen.append(ctx.sender_seen) or pipeline.RunResult("completed", [])))
     poller.poll_integration(gid)
     # invoice 7 from the same address (different case) came earlier
@@ -233,7 +233,83 @@ def test_poller_passes_gmail_labels(admin, monkeypatch):
         uidvalidity=5, last_uid=last, messages=[(103, msg.as_bytes())],
         gmail_meta={103: {"labels": ["\\Inbox"], "category": "promotions"}}))
     seen = []
-    monkeypatch.setattr(pipeline, "run_task", lambda steps, mail, ctx: (
+    monkeypatch.setattr(pipeline, "run_task", lambda steps, mail, ctx, **kw: (
         seen.append((mail.labels, mail.category)) or pipeline.RunResult("completed", [])))
     poller.poll_integration(gid)
     assert seen and seen[0] == (["\\Inbox"], "promotions")
+
+
+def test_task_chains(admin, monkeypatch):
+    from email.message import EmailMessage
+
+    from xmender.services import poller
+
+    c = admin
+    monkeypatch.setattr(gmail, "test_imap", lambda acct: (9, 10))
+    first = c.get("/api/integrations").json()["gmail"][0]["id"]
+    gid = c.post("/api/integrations/gmail", json={
+        "name": "Chains", "email": "chain@gmail.com", "password": "abcd efgh ijkl mnop"}).json()["integration"]["id"]
+    did = c.get("/api/integrations").json()["discord"][0]["id"]
+    post = lambda body: {"type": "template_post", "config": {"discord_integration_id": did, "body": body}}
+
+    a = c.post("/api/tasks", json={"name": "A", "gmail_integration_id": gid, "steps": [
+        {"type": "filter_builtin", "name": "inv", "config": {"subject": "invoice"}}, post("A")]}).json()["task"]
+    assert a["depends_on"] is None
+    # B runs after A completed and may use A's step names
+    body = {"name": "B", "gmail_integration_id": gid, "steps": [post("B {{inv.matched}}")],
+            "depends_on": {"task_id": a["id"], "status": ["completed", "bogus"]}}
+    r = c.post("/api/tasks", json=body)
+    assert r.status_code == 200, r.text
+    b = r.json()["task"]
+    assert b["depends_on"] == {"task_id": a["id"], "status": ["completed"]}
+    # C is the "else" branch: runs when A stopped
+    cc = c.post("/api/tasks", json={"name": "C", "gmail_integration_id": gid, "steps": [post("C")],
+                                    "depends_on": {"task_id": a["id"], "status": ["stopped"]}}).json()["task"]
+
+    # name clash with an inherited step, other inbox, no status, loop
+    clash = {**body, "steps": [{**post("x"), "name": "inv"}]}
+    assert "earlier task" in c.post("/api/tasks", json=clash).text
+    assert "same inbox" in c.post("/api/tasks", json={**body, "gmail_integration_id": first}).text
+    assert "at least one" in c.post("/api/tasks", json={**body, "depends_on": {"task_id": a["id"], "status": []}}).text
+    r = c.put(f"/api/tasks/{a['id']}", json={**a, "depends_on": {"task_id": b["id"]}})
+    assert r.status_code == 400 and "loop" in r.text
+    # editing A must not break B (it uses `inv`), nor move it to another inbox
+    r = c.put(f"/api/tasks/{a['id']}", json={**a, "steps": [post("A")]})
+    assert r.status_code == 400 and "“B”" in r.text
+    assert "same inbox" in c.put(f"/api/tasks/{a['id']}", json={**a, "gmail_integration_id": first}).text
+    assert c.delete(f"/api/tasks/{a['id']}").status_code == 409
+
+    sent = []
+    monkeypatch.setattr(discord, "send_embed", lambda url, **kw: sent.append(kw["description"]))
+
+    def deliver(uid, subject):
+        msg = EmailMessage()
+        msg["From"] = "x@shop.com"
+        msg["Subject"] = subject
+        msg.set_content("hi")
+        monkeypatch.setattr(gmail, "fetch_new", lambda acct, v, last, limit: gmail.FetchResult(
+            uidvalidity=9, last_uid=last, messages=[(uid, msg.as_bytes())]))
+        assert poller.poll_integration(gid)["runs"] == 3
+        return {r["task_name"]: r for r in c.get("/api/emails?limit=1").json()["emails"][0]["runs"]}
+
+    runs = deliver(11, "Invoice 1")
+    assert sent == ["A", "B true"]
+    assert [runs[k]["status"] for k in "ABC"] == ["completed", "completed", "skipped"]
+    assert runs["B"]["log"][0]["type"] == "chain" and runs["B"]["log"][0]["outcome"] == "pass"
+    assert "runs only if it stopped by a filter" in runs["C"]["log"][0]["detail"]
+
+    sent.clear()
+    runs = deliver(12, "Hello")
+    assert sent == ["C"] and runs["B"]["status"] == "skipped" and runs["C"]["status"] == "completed"
+
+    # a paused parent counts as "did not run"
+    assert c.put(f"/api/tasks/{a['id']}", json={**a, "enabled": False}).status_code == 200
+    sent.clear()
+    msg = EmailMessage()
+    msg["Subject"] = "Invoice 2"
+    msg.set_content("x")
+    monkeypatch.setattr(gmail, "fetch_new", lambda acct, v, last, limit: gmail.FetchResult(
+        uidvalidity=9, last_uid=last, messages=[(13, msg.as_bytes())]))
+    assert poller.poll_integration(gid)["runs"] == 2
+    runs = {r["task_name"]: r for r in c.get("/api/emails?limit=1").json()["emails"][0]["runs"]}
+    assert not sent and "(paused)" in runs["B"]["log"][0]["detail"]

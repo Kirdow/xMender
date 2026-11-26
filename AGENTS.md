@@ -128,7 +128,8 @@ Rules:
   4. Each message is parsed and stored as an `Email`; the unique key
      `(integration_id, uidvalidity, uid)` makes re-fetches harmless.
   5. The cursor advances per message.
-  6. Each enabled task for that inbox runs and writes a `TaskRun`.
+  6. Each enabled task for that inbox runs, parents before chained tasks
+     (`chains.order`), and writes a `TaskRun`.
 - Keep network calls (LLM, Discord, IMAP) **outside** DB transactions. The
   pattern: read what you need in one `session_scope()`, do the slow I/O, then
   write in a new `session_scope()`.
@@ -180,7 +181,26 @@ adds a `warning`. Renaming a step in the editor rewrites later conditions and
 `{{old.` placeholders.
 
 Run status: `completed`, `partial` (an error was continued past), `stopped`
-(a filter ended the chain) or `error`.
+(a filter ended the chain), `error`, or `skipped` (a task chain condition was
+not met; no step ran).
+
+### Task chains (`services/chains.py`)
+- `Task.depends_on_id` + `depends_on_status` (list of `chains.STATUSES`):
+  run only after that task ended with one of the statuses. API shape:
+  `depends_on: {task_id, status: [...]} | null`. `skipped` = the parent did
+  not run (paused, or its own chain condition failed).
+- Parent must use the same inbox; loops and chains over `MAX_DEPTH` are
+  refused. Deleting a parent is 409. Saving a parent revalidates every
+  descendant (`_check_dependents` in `api/tasks.py`), so a rename or inbox
+  change that would break one is a 400.
+- A chained task inherits its ancestors' named step outputs:
+  `validate_steps(inherited=...)` at save, `run_task(inherited=parent.vars)`
+  at run time. Own step names may not reuse inherited ones.
+- The poller adds a log entry `{"step": 0, "type": "chain", ...}` (outcome
+  `pass` or `skip`) as the first entry of a chained run; the dashboard shows
+  step 0 as `↳`.
+- Frontend: `chainOrder`, `chainSteps`, `chainDescendants` in `app.js`;
+  `#/tasks/new?after=ID` prefills the chain (router strips `?...`).
 
 To add a step type:
 - a module in `services/steps/` with its `StepDef`, added to `REGISTRY`.

@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from ..config import get_settings
 from ..db import session_scope
 from ..models import Email, Integration, Task, TaskRun, User, as_utc, utcnow
-from . import gmail, pipeline, usage
+from . import chains, gmail, pipeline, usage
 from .accounts import gmail_account, run_context
 
 log = logging.getLogger(__name__)
@@ -105,13 +105,10 @@ def _process_message(
             db.rollback()
             return 0  # already processed
         email_id = row.id
-        tasks = list(
-            db.scalars(
-                select(Task)
-                .where(Task.gmail_integration_id == integration_id, Task.enabled.is_(True))
-                .order_by(Task.id)
-            )
-        )
+        nodes = {
+            t.id: chains.node(t)
+            for t in db.scalars(select(Task).where(Task.gmail_integration_id == integration_id))
+        }
         ctx = run_context(db, user)
         if mail.from_addr:
             ctx.sender_seen = [
@@ -123,25 +120,50 @@ def _process_message(
                     .limit(SENDER_HISTORY_LIMIT)
                 )
             ]
-        jobs = [(t.id, t.name, list(t.steps)) for t in tasks]
+        jobs = chains.order(n for n in nodes.values() if n.enabled)
 
     # LLM and webhook calls happen outside any DB transaction.
-    for task_id, name, steps in jobs:
-        result = pipeline.run_task(steps, mail, ctx)
+    done: dict[int, pipeline.RunResult] = {}
+    for job in jobs:
+        result = _run_job(job, nodes, done, mail, ctx)
+        done[job.id] = result
         with session_scope() as db:
             db.add(
                 TaskRun(
-                    task_id=task_id,
+                    task_id=job.id,
                     email_id=email_id,
-                    task_name=name,
+                    task_name=job.name,
                     status=result.status,
                     log=result.log,
                 )
             )
             usage.record(
-                db, user_id, result.usage, task_id=task_id, task_name=name, email_id=email_id
+                db, user_id, result.usage, task_id=job.id, task_name=job.name, email_id=email_id
             )
     return len(jobs)
+
+
+def _run_job(
+    job: chains.Node, nodes: dict[int, chains.Node], done: dict[int, pipeline.RunResult],
+    mail: gmail.ParsedEmail, ctx: Any,
+) -> pipeline.RunResult:
+    """Run one task, or skip it when its chain condition is not met."""
+    parent = nodes.get(job.parent_id) if job.parent_id else None
+    if parent is None:
+        return pipeline.run_task(job.steps, mail, ctx)
+    prev = done.get(parent.id)
+    got = prev.status if prev is not None else "skipped"
+    why = f"“{parent.name}” {chains.STATUS_LABELS.get(got, got)}"
+    if prev is None and not parent.enabled:
+        why += " (paused)"
+    entry: dict[str, Any] = {"step": 0, "type": "chain", "label": f"After {parent.name}"}
+    if got not in job.statuses:
+        entry.update(outcome="skip", detail=f"{why}; runs only if it {chains.describe(job.statuses)}")
+        return pipeline.RunResult("skipped", [entry])
+    entry.update(outcome="pass", detail=why)
+    result = pipeline.run_task(job.steps, mail, ctx, inherited=prev.vars if prev else None)
+    result.log.insert(0, entry)
+    return result
 
 
 class Poller:

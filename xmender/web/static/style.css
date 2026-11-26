@@ -337,3 +337,15 @@ button.reveal { padding: 2px 6px; line-height: 0; background: transparent; borde
 button.reveal svg { width: 15px; height: 15px; display: block; }
 button.reveal:hover, button.reveal.active { color: var(--primary); }
 .input-row button.reveal { border-color: var(--border); padding: 0 10px; }
+
+/* Task chains: chained tasks sit indented under the task they run after. */
+.card.chained { position: relative; }
+.card.chained.depth-1 { margin-left: 24px; }
+.card.chained.depth-2 { margin-left: 48px; }
+.card.chained.depth-3 { margin-left: 72px; }
+.card.chained.depth-4 { margin-left: 96px; }
+@media (max-width: 640px) {
+  .card.chained.depth-1, .card.chained.depth-2, .card.chained.depth-3, .card.chained.depth-4 { margin-left: 12px; }
+}
+.chain-line { margin-top: 4px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.chain-line .chip-name { color: var(--primary); }
