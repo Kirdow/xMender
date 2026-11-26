@@ -52,6 +52,8 @@ class User(Base):
     permissions: Mapped[list[str]] = mapped_column(JSON, default=list)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
     default_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # IANA zone name, filled from the browser on first login; used by time filters.
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     def has_admin(self) -> bool:

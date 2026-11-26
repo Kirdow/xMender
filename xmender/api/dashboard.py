@@ -7,14 +7,14 @@ import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
 from ..models import Email, Integration, TaskRun, User, utcnow
-from ..services import llm, usage
+from ..services import llm, timewindow, usage
 from ..services.accounts import anthropic_key
 from ..services.poller import poller
 from .deps import current_user, user_dict
@@ -102,22 +102,31 @@ async def models(refresh: bool = False, db: Session = Depends(get_db), user: Use
 
 class MySettings(BaseModel):
     default_model: str | None = None
+    timezone: str | None = Field(None, max_length=64)
 
 
 @router.put("/me/settings")
 async def put_my_settings(body: MySettings, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    model = (body.default_model or "").strip() or None
-    if model:
-        key = anthropic_key(db, user.id)
-        if not key:
-            raise HTTPException(400, "Set up the Anthropic integration first.")
-        try:
-            ids = {m.id for m in await asyncio.to_thread(llm.list_models, key)}
-        except llm.LLMError as e:
-            raise HTTPException(400, str(e)) from e
-        if model not in ids:
-            raise HTTPException(400, f"Model `{model}` is not offered by the provider.")
-    user.default_model = model
+    """Updates only the fields present in the body."""
+    sent = body.model_fields_set
+    if "default_model" in sent:
+        model = (body.default_model or "").strip() or None
+        if model:
+            key = anthropic_key(db, user.id)
+            if not key:
+                raise HTTPException(400, "Set up the Anthropic integration first.")
+            try:
+                ids = {m.id for m in await asyncio.to_thread(llm.list_models, key)}
+            except llm.LLMError as e:
+                raise HTTPException(400, str(e)) from e
+            if model not in ids:
+                raise HTTPException(400, f"Model `{model}` is not offered by the provider.")
+        user.default_model = model
+    if "timezone" in sent:
+        zone = (body.timezone or "").strip() or None
+        if zone and not timewindow.valid_zone(zone):
+            raise HTTPException(400, f"Unknown time zone `{zone}`.")
+        user.timezone = zone
     return {"user": user_dict(user)}
 
 

@@ -48,4 +48,5 @@ def run_context(db: Session, user: User) -> RunContext:
         api_key=anthropic_key(db, user.id),
         default_model=user.default_model,
         discord={h.id: (h.name, decrypt(h.secret)) for h in hooks},
+        timezone=user.timezone,
     )

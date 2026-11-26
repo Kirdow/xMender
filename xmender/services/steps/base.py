@@ -9,6 +9,7 @@ its own config and does its own work.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Callable
 
 from .. import llm, prompts
@@ -31,6 +32,10 @@ class RunContext:
     default_model: str | None
     # id -> (display name, webhook url)
     discord: dict[int, tuple[str, str]] = field(default_factory=dict)
+    # The user's IANA time zone, if known.
+    timezone: str | None = None
+    # Fixed clock for tests; None means the real time.
+    now: datetime | None = None
 
 
 @dataclass

@@ -377,3 +377,37 @@ def test_bulk_filter():
     assert pipeline.run_task(steps, news, pipeline.RunContext(None, None)).status == "stopped"
     with pytest.raises(pipeline.StepConfigError):
         _v([{"type": "filter_bulk", "config": {"kinds": []}}])
+
+
+def test_time_window():
+    from datetime import UTC, datetime
+
+    from xmender.services import timewindow as tw
+
+    t = tw.parse_hhmm
+    # 2026-11-27 is a Friday. 21:30 UTC = 22:30 in Stockholm (UTC+1).
+    fri = datetime(2026, 11, 27, 21, 30, tzinfo=UTC)
+    assert tw.in_window(fri, [4], t("22:00"), t("23:00"), "Europe/Stockholm") == (True, "Fri 22:30 Europe/Stockholm")
+    assert not tw.in_window(fri, [4], t("22:00"), t("23:00"), "UTC")[0]
+    # overnight window belongs to the day it started
+    sat_early = datetime(2026, 11, 28, 1, 0, tzinfo=UTC)
+    assert tw.in_window(sat_early, [4], t("22:00"), t("02:00"), "UTC")[0]
+    assert not tw.in_window(sat_early, [5], t("22:00"), t("02:00"), "UTC")[0]
+    # same start and end: whole day
+    assert tw.in_window(fri, [4], t("00:00"), t("00:00"), "UTC")[0]
+    with pytest.raises(ValueError):
+        t("25:00")
+
+    steps = _v([{"type": "filter_time", "name": "hours",
+                 "config": {"days": [4, 4, 9], "start": "09:00", "end": "17:00"}}])
+    assert steps[0]["config"] == {"days": [4], "start": "09:00", "end": "17:00", "timezone": ""}
+    ctx = pipeline.RunContext(None, None, timezone="Europe/Stockholm",
+                              now=datetime(2026, 11, 27, 10, 0, tzinfo=UTC))
+    res = pipeline.run_task(steps, make_mail(), ctx)
+    assert res.status == "completed" and res.vars["hours"]["local_time"] == "Fri 11:00 Europe/Stockholm"
+    # no zone anywhere -> UTC with a warning
+    res = pipeline.run_task(steps, make_mail(), pipeline.RunContext(None, None, now=ctx.now))
+    assert res.log[0]["warning"].startswith("no time zone")
+    for bad in ({"days": []}, {"days": [1], "start": "9am"}, {"days": [1], "timezone": "Mars/Base"}):
+        with pytest.raises(pipeline.StepConfigError):
+            _v([{"type": "filter_time", "config": bad}])

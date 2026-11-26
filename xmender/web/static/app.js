@@ -173,7 +173,30 @@ const ROUTES = [
 function can(perm) { return S.me && (S.me.is_admin || S.me.permissions.includes(perm)); }
 function allowed(r) { return (!r.perm || can(r.perm)) && (!r.admin || S.me.is_admin); }
 
+function browserZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch (_) { return 'UTC'; }
+}
+function allZones() {
+  try { return Intl.supportedValuesOf('timeZone'); } catch (_) { return [browserZone(), 'UTC']; }
+}
+function zoneSelect(value, emptyLabel) {
+  const zones = allZones();
+  const sel = h('select', {}, emptyLabel ? h('option', { value: '' }, emptyLabel) : null,
+    (value && !zones.includes(value) ? [value, ...zones] : zones).map((z) => h('option', { value: z }, z)));
+  sel.value = value || '';
+  return sel;
+}
+
+// The first time a user is signed in, store their browser's time zone.
+let tzSaved = false;
+function ensureTimezone() {
+  if (tzSaved || !S.me || S.me.timezone) return;
+  tzSaved = true;
+  api('PUT', '/api/me/settings', { timezone: browserZone() }).then((r) => { S.me = r.user; }).catch(() => {});
+}
+
 function route() {
+  ensureTimezone();
   const [name, ...rest] = location.hash.replace(/^#\/?/, '').split('/');
   const r = ROUTES.find((x) => x.path === name && allowed(x)) || ROUTES[0];
   if (r.path !== name) { history.replaceState(null, '', '#/' + r.path); }
@@ -573,14 +596,16 @@ const STEP_DEFAULTS = {
   filter_builtin: () => ({ from: '', to: '', subject: '', has_words: '', not_words: '', regex: false, has_attachment: null,
     attachment_ext: '', attachment_name: '', attachment_type: '', attachment_min_kb: null, attachment_max_kb: null }),
   filter_bulk: () => ({ kinds: ['newsletter', 'bulk', 'noreply'] }),
+  filter_time: () => ({ days: [0, 1, 2, 3, 4], start: '09:00', end: '17:00', timezone: '' }),
   filter_agent: () => ({ instructions: '', model: null }),
   webhook_agent: () => ({ instructions: '', model: null, discord_integration_id: null }),
 };
 // Default step names on add; a number is appended when taken.
-const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_agent: 'ai_filter', webhook_agent: 'notify' };
+const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_agent: 'ai_filter', webhook_agent: 'notify' };
 // Output fields per type, mirroring the server. Filters also output `matched`.
 const STEP_OUTPUTS = {
   filter_bulk: () => ['signals'],
+  filter_time: () => ['local_time'],
 };
 const COND_OPS = [['equals', 'equals'], ['not_equals', 'does not equal'], ['contains', 'contains'],
   ['in', 'is one of'], ['not_in', 'is not one of'], ['is_set', 'is set'], ['is_empty', 'is empty']];
@@ -675,6 +700,28 @@ const STEP_FORMS = {
     return [
       checkList(env.meta.bulk_kinds, c, 'kinds'),
       h('div', { class: 'hint' }, 'Matches when any checked signal is in the email\'s headers. Invert it (Options) to keep only personal mail.'),
+    ];
+  },
+  filter_time(c) {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    if (!Array.isArray(c.days)) c.days = [];
+    const dayRow = h('div', { class: 'chips day-chips' }, days.map((d, i) => {
+      const b = h('button', { type: 'button', class: 'chip' + (c.days.includes(i) ? ' aqua' : ''), 'aria-pressed': String(c.days.includes(i)), onclick: () => {
+        c.days = c.days.includes(i) ? c.days.filter((x) => x !== i) : [...c.days, i].sort();
+        b.classList.toggle('aqua', c.days.includes(i));
+        b.setAttribute('aria-pressed', String(c.days.includes(i)));
+      } }, d);
+      return b;
+    }));
+    const zone = zoneSelect(c.timezone, `My time zone (${S.me.timezone || browserZone()})`);
+    zone.addEventListener('change', () => { c.timezone = zone.value; });
+    return [
+      field('Days', dayRow),
+      h('div', { class: 'grid-3' },
+        field('From', bindIn(c, 'start', h('input', { type: 'time', value: c.start || '00:00' }))),
+        field('Until', bindIn(c, 'end', h('input', { type: 'time', value: c.end || '00:00' }))),
+        field('Time zone', zone)),
+      h('div', { class: 'hint' }, 'Matches mail processed inside the window. Same start and end means the whole day; an end before the start runs past midnight. Invert it (Options) for "outside these hours".'),
     ];
   },
   filter_agent(c, env) {
@@ -889,9 +936,21 @@ async function viewSettings(main) {
   }) }, 'Change password');
 
   const usageBox = h('div', {});
+  const tz = zoneSelect(S.me.timezone || browserZone());
+  const tzBtn = h('button', { class: 'primary', onclick: () => withBusy(tzBtn, async () => {
+    try {
+      const r = await api('PUT', '/api/me/settings', { timezone: tz.value });
+      S.me = r.user;
+      toast('Time zone saved.', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  }) }, 'Save time zone');
   page(main, 'Settings', `Signed in as ${S.me.username}.`, null,
     h('h2', {}, h('span', { class: 'dot pink' }), 'Default model'),
     h('div', { class: 'card' }, modelBox),
+    h('h2', {}, h('span', { class: 'dot' }), 'Time zone'),
+    h('div', { class: 'card' },
+      field('Your time zone', tz, `Used by time-window filters unless a step sets its own. Your browser reports ${browserZone()}.`),
+      tzBtn),
     h('h2', {}, h('span', { class: 'dot lime' }), 'API usage'),
     usageBox,
     h('h2', {}, h('span', { class: 'dot' }), 'Password'),

@@ -66,6 +66,9 @@ deploy/           systemd unit template; scripts/install-service.sh fills @USER@
 - `is_admin` gives other users admin rights; they stay deletable.
 - New permissions go in `models.PERMISSIONS`. The admin UI renders that list
   automatically.
+- `User.timezone` (IANA) is set from the browser on first sign-in
+  (`ensureTimezone()` in `app.js`) and editable in Settings.
+  `PUT /api/me/settings` updates only the fields sent.
 - Self-registration is the `registration_enabled` key in `AppSetting`
   (default `False`), read and written through `get_app_setting` /
   `set_app_setting`.
@@ -128,6 +131,7 @@ blocks deleting them).
 |---|---|---|
 | `filter_builtin` | filter | `services/filters.py`, Gmail-like fields; optional regex mode (`regex` package, per-search timeout) and attachment details |
 | `filter_bulk` | filter | `services/signals.py`: List-Unsubscribe/List-Id, Precedence/Auto-Submitted/Feedback-ID, no-reply sender; outputs `signals` |
+| `filter_time` | filter | `services/timewindow.py`: days + HH:MM window in the step's zone, else `User.timezone`, else UTC; uses processing time, not the Date header |
 | `filter_agent` | filter | LLM verdict; matches only if the reply ends with exactly `FILTER MATCH` |
 | `webhook_agent` | action | LLM writes the text; posted as an embed titled `xMender Notification`, colour `0x00FFFF` |
 

@@ -139,3 +139,11 @@ def test_usage_report(admin):
     feed = admin.get("/api/emails").json()["emails"]
     step = feed[0]["runs"][0]["log"][0]
     assert step["usage"]["cost_nanousd"] == 6_076_000
+
+
+def test_my_settings_partial_update(admin):
+    me = admin.put("/api/me/settings", json={"timezone": "Europe/Stockholm"}).json()["user"]
+    # sending only the time zone keeps the default model
+    assert me["timezone"] == "Europe/Stockholm" and me["default_model"] == "claude-opus-5-5"
+    assert admin.put("/api/me/settings", json={"timezone": "Mars/Base"}).status_code == 400
+    assert admin.get("/api/auth/state").json()["user"]["timezone"] == "Europe/Stockholm"

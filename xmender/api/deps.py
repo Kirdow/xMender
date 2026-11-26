@@ -106,5 +106,6 @@ def user_dict(u: User) -> dict[str, Any]:
         "is_admin": u.has_admin(),
         "permissions": list(u.permissions or []),
         "default_model": u.default_model,
+        "timezone": u.timezone,
         "created_at": u.created_at.isoformat() if u.created_at else None,
     }
