@@ -348,7 +348,7 @@ function mailCard(m) {
     r.log.map((s) => [
       h('div', { class: 'step-line' }, h('span', { class: 'n' }, s.step + '.'),
         h('span', {}, s.label), h('span', { class: `chip ${OUTCOME_CHIP[s.outcome] || ''}` }, s.outcome || '?'),
-        h('span', { class: 'detail' }, s.detail || '', s.model ? ` · ${s.model}` : '', s.warning ? ` · ${s.warning}` : '',
+        h('span', { class: 'detail' }, s.detail || '', s.model ? ` · ${s.model}` : '', s.attachments ? ` · read ${s.attachments.join(', ')}` : '', s.warning ? ` · ${s.warning}` : '',
           s.usage ? h('span', { title: exactUsd(s.usage.cost_nanousd) }, ` · ${fmtNum(s.usage.input_tokens)} in / ${fmtNum(s.usage.output_tokens)} out · ${fmtUsd(s.usage.cost_nanousd)}`) : null)),
       s.response ? h('pre', { class: 'response' }, s.response) : null,
     ]))) : h('div', { class: 'muted small' }, 'No task ran on this email.'));
@@ -751,6 +751,12 @@ function discordSelect(c, env) {
   return field('Discord webhook', dsel);
 }
 
+function attachmentsField(c) {
+  return field('Attachments', choice([['', 'Do not send'], ['pdf', 'Send PDFs'], ['images', 'Send images'], ['both', 'Send PDFs and images']],
+    c.attachments || '', (v) => { c.attachments = v || null; }),
+  'Lets the model read the email\'s PDF and image attachments (up to 5 files, 10 MB each, 20 MB total). Each page or image adds input tokens, so this can cost much more per email.');
+}
+
 function modelField(c, env) {
   const mdl = modelSelect(env.models.models, c.model, env.defaultLabel);
   mdl.addEventListener('change', () => { c.model = mdl.value || null; });
@@ -862,6 +868,7 @@ const STEP_FORMS = {
     return [
       instructionsField(c, 'Describe which emails should pass. e.g. "Emails from a real person asking me something that needs a reply."',
         'The model sees the email and these instructions; the email passes only if its reply ends with FILTER MATCH.'),
+      attachmentsField(c),
       modelField(c, env),
     ];
   },
@@ -885,6 +892,7 @@ const STEP_FORMS = {
         h('button', { type: 'button', class: 'small', onclick: () => { c.labels.push({ name: '', description: '' }); draw(); } }, '+ Add category')),
         'The result is {{name.label}} and {{name.reason}}. Route mail with "Run this step: only if <name> label equals …" on later steps.'),
       instructionsField(c, 'Optional. e.g. "Receipts for things I already paid are not invoices."', 'Optional extra guidance for the model.'),
+      attachmentsField(c),
       modelField(c, env),
     ];
   },
@@ -910,6 +918,7 @@ const STEP_FORMS = {
         h('button', { type: 'button', class: 'small', onclick: () => { c.fields.push({ name: '', type: 'string', description: '', required: false }); draw(); } }, '+ Add field')),
         'Later steps use them as {{name.key}}. Missing values are empty; a missing required value fails the step.'),
       instructionsField(c, 'Optional. e.g. "Amounts are in SEK. The due date may be written as a weekday."', 'Optional extra guidance for the model.'),
+      attachmentsField(c),
       modelField(c, env),
     ];
   },
@@ -948,6 +957,7 @@ const STEP_FORMS = {
       discordSelect(c, env),
       instructionsField(c, 'Describe the notification. e.g. "Summarise in 2 bullet points and list any due dates."',
         'The model\'s reply is posted as an aqua embed titled "xMender Notification".'),
+      attachmentsField(c),
       modelField(c, env),
     ];
   },

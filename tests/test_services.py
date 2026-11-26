@@ -724,3 +724,42 @@ def test_http_post_step(monkeypatch):
                 {"http_integration_id": 3, "body": '{"a": "{{nope.x}}"}'}):
         with pytest.raises(pipeline.StepConfigError):
             pipeline.validate_steps([{"type": "http_post", "config": cfg}], discord_ids=set(), model_ids=None, http_ids={3})
+
+
+def test_attachments_to_llm(monkeypatch):
+    import base64
+
+    from xmender.services.steps import base as sb
+
+    pdf = gmail.Attachment("bill.pdf", "application/pdf", 4, b"%PDF")
+    png = gmail.Attachment("scan.bin.png", "application/octet-stream", 3, b"PNG")
+    zipf = gmail.Attachment("a.zip", "application/zip", 3, b"zip")
+    big = gmail.Attachment("huge.pdf", "application/pdf", sb.MAX_ATTACHMENT_BYTES + 1, b"x")
+    mail = make_mail(attachments=[pdf, png, zipf, big])
+
+    blocks, sent, notes = sb.attachment_blocks("both", mail, None)
+    assert sent == ["bill.pdf", "scan.bin.png"] and "huge.pdf: larger than 10.0 MB" in notes
+    assert blocks[0] == {"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
+                                                        "data": base64.b64encode(b"%PDF").decode()}}
+    assert blocks[1]["type"] == "image" and blocks[1]["source"]["media_type"] == "image/png"
+    assert sb.attachment_blocks("images", mail, None)[1] == ["scan.bin.png"]
+    no_pdf = llm.ModelInfo("m", "m", 1000, pdf_input=False)
+    _, sent, notes = sb.attachment_blocks("pdf", mail, no_pdf)
+    assert sent == [] and notes[0] == "bill.pdf: the model cannot read pdfs"
+    many = make_mail(attachments=[gmail.Attachment(f"{i}.pdf", "application/pdf", 1, b"x") for i in range(7)])
+    assert len(sb.attachment_blocks("pdf", many, None)[1]) == sb.MAX_ATTACHMENTS
+
+    seen = []
+    monkeypatch.setattr(llm, "find_model", lambda key, m: llm.ModelInfo(m, m, 1000))
+    monkeypatch.setattr(llm, "complete", lambda key, model, s, u, **kw: seen.append(u) or llm.LLMResult(
+        "FILTER MATCH", "end_turn", model))
+    steps = _v([{"type": "filter_agent", "config": {"instructions": "x", "attachments": "pdf"}},
+                {"type": "filter_agent", "config": {"instructions": "x", "attachments": "bogus"}}])
+    assert steps[0]["config"]["attachments"] == "pdf" and "attachments" not in steps[1]["config"]
+    res = pipeline.run_task(steps, mail, pipeline.RunContext("k", "m"))
+    assert res.status == "completed"
+    content = seen[0]
+    assert [b["type"] for b in content] == ["document", "text"]
+    assert "untrusted data" in content[-1]["text"] and res.log[0]["attachments"] == ["bill.pdf"]
+    assert "huge.pdf" in res.log[0]["warning"]
+    assert isinstance(seen[1], str)  # attachments off: plain text prompt

@@ -207,6 +207,11 @@ Each step appends a log entry to `TaskRun.log` with these fields: `step`,
   the schema, that feature is dropped once and the call retried;
   `LLMResult.structured` says whether the schema was enforced. Callers must
   validate the JSON either way.
+- Agent steps may set `attachments` (`pdf` | `images` | `both`).
+  `steps.base.call_llm(..., mail=mail)` then sends readable attachments as
+  base64 `document`/`image` blocks before the text (max 5 files, 10 MB each,
+  20 MB total; skipped if the model reports no `pdf_input`/`image_input`).
+  Sent names go to the log entry's `attachments`, skipped ones to `warning`.
 - A `stop_reason == "refusal"` result stops a filter and errors other agent
   steps.
 - No `thinking` or `temperature` parameters are sent, because users can pick
@@ -240,6 +245,8 @@ Each step appends a log entry to `TaskRun.log` with these fields: `step`,
   `<user_instructions_{nonce}>`). The nonce is stripped from the content.
 - `_security_rules()` states which block is instructions and which is data,
   and that the model has no tools. Reuse it for any new agent step.
+- Attachment blocks are covered by rule 2 of `_security_rules()` and a note
+  in the user text: they are untrusted email data.
 - The email body is capped at `BODY_CHAR_LIMIT`, with an explicit
   truncation note.
 - Discord posts always send `allowed_mentions: {"parse": []}`.

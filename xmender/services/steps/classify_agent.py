@@ -12,7 +12,7 @@ from .. import llm, prompts
 from ..gmail import ParsedEmail
 from .base import (
     Result, RunContext, RunState, StepConfigError, StepDef, StepError, ValidateContext,
-    call_llm, clip, validate_instructions, validate_model,
+    call_llm, clip, validate_attachments, validate_instructions, validate_model,
 )
 from .extract_agent import parse_json
 
@@ -42,11 +42,11 @@ def _validate(cfg: dict[str, Any], vctx: ValidateContext) -> dict[str, Any]:
         raise StepConfigError("add at least one category.")
     if len(labels) > MAX_LABELS:
         raise StepConfigError(f"at most {MAX_LABELS} categories.")
-    return {
+    return validate_attachments(cfg, {
         "labels": labels,
         "instructions": validate_instructions(cfg, 4000, required=False),
         "model": validate_model(cfg, vctx),
-    }
+    })
 
 
 def output_schema(labels: list[dict[str, Any]]) -> dict[str, Any]:
@@ -65,7 +65,8 @@ def _run(cfg: dict[str, Any], mail: ParsedEmail, ctx: RunContext, state: RunStat
          entry: dict[str, Any]) -> Result:
     labels = cfg["labels"]
     prompt = prompts.classify_agent_prompt(cfg.get("instructions") or "", labels, mail)
-    res = call_llm(ctx, cfg, prompt, entry, state, output_schema=output_schema(labels))
+    res = call_llm(ctx, cfg, prompt, entry, state, output_schema=output_schema(labels),
+                   mail=mail)
     entry.update(model=res.model, response=clip(res.text))
     if res.stop_reason == "refusal":
         raise llm.LLMError("Model declined to classify this email.")

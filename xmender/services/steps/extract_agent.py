@@ -15,7 +15,7 @@ from .. import llm, prompts
 from ..gmail import ParsedEmail
 from .base import (
     Result, RunContext, RunState, StepConfigError, StepDef, StepError, ValidateContext,
-    call_llm, clip, validate_instructions, validate_model,
+    call_llm, clip, validate_attachments, validate_instructions, validate_model,
 )
 
 FIELD_TYPES = ("string", "number", "integer", "boolean", "date")
@@ -50,11 +50,11 @@ def _validate(cfg: dict[str, Any], vctx: ValidateContext) -> dict[str, Any]:
             "description": str(f.get("description") or "").strip()[:300],
             "required": f.get("required") is True,
         })
-    return {
+    return validate_attachments(cfg, {
         "fields": fields,
         "instructions": validate_instructions(cfg, 4000, required=False),
         "model": validate_model(cfg, vctx),
-    }
+    })
 
 
 def output_schema(fields: list[dict[str, Any]]) -> dict[str, Any]:
@@ -131,7 +131,8 @@ def _run(cfg: dict[str, Any], mail: ParsedEmail, ctx: RunContext, state: RunStat
          entry: dict[str, Any]) -> Result:
     fields = cfg["fields"]
     prompt = prompts.extract_agent_prompt(cfg.get("instructions") or "", fields, mail)
-    res = call_llm(ctx, cfg, prompt, entry, state, output_schema=output_schema(fields))
+    res = call_llm(ctx, cfg, prompt, entry, state, output_schema=output_schema(fields),
+                   mail=mail)
     entry.update(model=res.model, response=clip(res.text))
     if res.stop_reason == "refusal":
         raise llm.LLMError("Model declined to extract from this email.")
