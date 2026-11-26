@@ -472,3 +472,42 @@ def test_phishing_signals():
                 {"kinds": ["brand_mismatch"]}, {"kinds": ["free_mail"], "brands": "x ="}):
         with pytest.raises(pipeline.StepConfigError):
             _v([{"type": "filter_phishing", "config": bad}])
+
+
+def test_template_render_and_check():
+    from xmender.services import template
+
+    scope = template.scope_for(make_mail(), {"cls": {"label": "invoice", "n": None}})
+    text, warn = template.render(
+        "{{ email.subject | upper }} / {{cls.label}} / {{cls.n | default:none}} / "
+        "{{email.body|clip:10}} / {{zz.q}}", scope)
+    assert text == "YOUR INVOICE #42 / invoice / none / Thanks fo… / "
+    assert warn == ["zz.q had no value"]
+    # values are inserted as text, never re-parsed as placeholders
+    evil = template.scope_for(make_mail(subject="{{email.body}}"), {})
+    assert template.render("{{email.subject}}", evil)[0] == "{{email.body}}"
+
+    template.check("{{email.from}} {{cls.label}}", {"cls": {"label"}})
+    for bad, msg in (("{{email.nope}}", "no field"), ("{{later.x}}", "not a named earlier"),
+                     ("{{cls.zz}}", "no output"), ("{{email.body | shout}}", "unknown modifier"),
+                     ("{{email.body | clip:x}}", "positive number"), ("{{ hello }}", "not a valid")):
+        with pytest.raises(template.TemplateError, match=msg):
+            template.check(bad, {"cls": {"label"}})
+
+
+def test_template_post(monkeypatch):
+    sent = []
+    monkeypatch.setattr(discord, "send_embed", lambda url, **kw: sent.append(kw))
+    steps = _v([
+        {"type": "filter_bulk", "name": "bulk", "on_no_match": "continue", "config": {"kinds": ["newsletter"]}},
+        {"type": "template_post", "config": {"discord_integration_id": 7, "title": "New: {{email.subject}}",
+                                             "body": "{{email.from_addr}} bulk={{bulk.matched}}"}},
+    ])
+    res = pipeline.run_task(steps, make_mail(), pipeline.RunContext(None, None, discord={7: ("A", "https://a")}))
+    assert res.status == "completed"
+    assert sent == [{"title": "New: Your invoice #42", "description": "billing@shop.com bulk=false",
+                     "footer": None, "thread_name": "Your invoice #42"}]
+    with pytest.raises(pipeline.StepConfigError, match="Step 1: body: .* not a named earlier step"):
+        _v([{"type": "template_post", "config": {"discord_integration_id": 7, "body": "{{x.y}}"}}])
+    with pytest.raises(pipeline.StepConfigError, match="body template is empty"):
+        _v([{"type": "template_post", "config": {"discord_integration_id": 7, "body": " "}}])

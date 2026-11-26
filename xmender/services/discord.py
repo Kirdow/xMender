@@ -22,6 +22,7 @@ API_BASE = "https://discord.com/api/v10"
 EMBED_TITLE = "xMender Notification"
 EMBED_COLOR = 0x00FFFF  # bright aqua
 EMBED_DESCRIPTION_LIMIT = 4096
+EMBED_TITLE_LIMIT = 256
 
 _URL_RE = re.compile(
     r"^https://(?:(?:canary|ptb)\.)?discord(?:app)?\.com/api(?:/v\d+)?/webhooks/(\d{5,25})/([A-Za-z0-9_\-]{20,200})/?$"
@@ -74,11 +75,12 @@ def send_embed(
     description: str,
     footer: str | None = None,
     thread_name: str | None = None,
+    title: str | None = None,
 ) -> None:
     """Post one embed. Blocking; raises DiscordError on failure."""
     hook = parse_webhook_url(webhook_url)
     embed: dict = {
-        "title": EMBED_TITLE,
+        "title": clip((title or "").strip() or EMBED_TITLE, EMBED_TITLE_LIMIT),
         "description": clip(description.strip() or "(empty)", EMBED_DESCRIPTION_LIMIT),
         "color": EMBED_COLOR,
     }

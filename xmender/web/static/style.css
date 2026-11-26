@@ -242,6 +242,9 @@ pre.response {
 .day-chips { margin-top: 2px; }
 .day-chips .chip { font-size: 0.78rem; padding: 4px 12px; }
 textarea.short { min-height: 70px; }
+.tpl-help { margin: 2px 0 10px; }
+.tpl-help summary { cursor: pointer; font-size: 0.75rem; color: var(--muted); }
+.tpl-help .chip { font-family: inherit; }
 .when-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .when-row select, .when-row input { width: auto; flex: 1 1 140px; }
 .step-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 8px; }

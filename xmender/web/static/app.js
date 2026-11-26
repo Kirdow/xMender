@@ -601,9 +601,11 @@ const STEP_DEFAULTS = {
   filter_phishing: () => ({ kinds: ['auth_fail', 'reply_to_mismatch', 'name_has_address'], min_signals: 1, brands: '' }),
   filter_agent: () => ({ instructions: '', model: null }),
   webhook_agent: () => ({ instructions: '', model: null, discord_integration_id: null }),
+  template_post: () => ({ discord_integration_id: null, title: 'xMender: {{email.subject | clip:200}}',
+    body: '**From:** {{email.from}}\n\n{{email.snippet}}', footer: '' }),
 };
 // Default step names on add; a number is appended when taken.
-const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_sender: 'sender', filter_phishing: 'phishing', filter_agent: 'ai_filter', webhook_agent: 'notify' };
+const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_sender: 'sender', filter_phishing: 'phishing', filter_agent: 'ai_filter', webhook_agent: 'notify', template_post: 'post' };
 // Output fields per type, mirroring the server. Filters also output `matched`.
 const STEP_OUTPUTS = {
   filter_bulk: () => ['signals'],
@@ -614,6 +616,37 @@ const STEP_OUTPUTS = {
 const COND_OPS = [['equals', 'equals'], ['not_equals', 'does not equal'], ['contains', 'contains'],
   ['in', 'is one of'], ['not_in', 'is not one of'], ['is_set', 'is set'], ['is_empty', 'is empty']];
 const VALUE_OPS = ['equals', 'not_equals', 'contains', 'in', 'not_in'];
+
+const EMAIL_FIELDS = ['from', 'from_name', 'from_addr', 'to', 'cc', 'subject', 'date', 'snippet', 'body', 'attachments', 'attachment_count'];
+
+// Clickable placeholders for template fields. Inserts into the template
+// field that last had focus.
+function templateHelp(env) {
+  const prior = env.task.steps.slice(0, env.idx).filter((s) => s.name);
+  const vars = [...EMAIL_FIELDS.map((f) => `email.${f}`),
+    ...prior.flatMap((s) => stepOutputs(s, env).map((f) => `${s.name}.${f}`))];
+  const insert = (v) => {
+    const el = env.lastTemplate;
+    if (!el) { toast('Click into a template field first.', 'err'); return; }
+    const text = `{{${v}}}`;
+    const at = el.selectionStart ?? el.value.length;
+    el.value = el.value.slice(0, at) + text + el.value.slice(el.selectionEnd ?? at);
+    el.dispatchEvent(new Event('input'));
+    el.focus();
+    el.selectionStart = el.selectionEnd = at + text.length;
+  };
+  return h('details', { class: 'tpl-help' },
+    h('summary', {}, 'Placeholders'),
+    h('div', { class: 'chips' }, vars.map((v) => h('button', { type: 'button', class: 'chip', onclick: () => insert(v) }, v))),
+    h('div', { class: 'hint' }, 'Write {{step.field}} to insert a value. Modifiers: {{email.body | clip:500}}, {{x.y | default:none}}, | oneline, | upper, | lower. Name an earlier step to use its outputs.'));
+}
+
+function templateInput(c, key, env, multiline, placeholder) {
+  const el = multiline ? h('textarea', { placeholder }) : h('input', { type: 'text', placeholder });
+  el.value = c[key] || '';
+  el.addEventListener('focus', () => { env.lastTemplate = el; });
+  return bindIn(c, key, el);
+}
 
 function stepOutputs(step, env) {
   const out = STEP_OUTPUTS[step.type] ? STEP_OUTPUTS[step.type](step.config || {}) : [];
@@ -763,6 +796,15 @@ const STEP_FORMS = {
       modelField(c, env),
     ];
   },
+  template_post(c, env) {
+    return [
+      discordSelect(c, env),
+      field('Title', templateInput(c, 'title', env, false, 'xMender Notification')),
+      field('Message', templateInput(c, 'body', env, true), 'Discord markdown works. Nobody is ever pinged.'),
+      field('Footer', templateInput(c, 'footer', env, false, 'optional')),
+      templateHelp(env),
+    ];
+  },
   webhook_agent(c, env) {
     return [
       discordSelect(c, env),
@@ -828,8 +870,14 @@ function stepOptions(step, idx, env) {
   name.addEventListener('input', () => { step.name = name.value.trim().toLowerCase(); });
   name.addEventListener('change', () => {
     // Keep later conditions pointing at this step after a rename.
-    if (before && step.name) {
-      for (const s of env.task.steps.slice(idx + 1)) if (s.when && s.when.step === before) s.when.step = step.name;
+    if (before && step.name && before !== step.name) {
+      const ref = new RegExp(`\\{\\{(\\s*)${before}\\.`, 'g');
+      for (const s of env.task.steps.slice(idx + 1)) {
+        if (s.when && s.when.step === before) s.when.step = step.name;
+        for (const [k, v] of Object.entries(s.config || {})) {
+          if (typeof v === 'string') s.config[k] = v.replace(ref, `{{$1${step.name}.`);
+        }
+      }
     }
     before = step.name;
     env.redraw();
@@ -890,7 +938,7 @@ async function viewTaskEditor(main, id) {
 
   function stepForm(step, idx) {
     const form = STEP_FORMS[step.type];
-    const body = form ? form(step.config, env) : h('div', { class: 'muted small' }, 'Unknown step type.');
+    const body = form ? form(step.config, { ...env, idx, step }) : h('div', { class: 'muted small' }, 'Unknown step type.');
     const move = (d) => () => { const j = idx + d; [task.steps[idx], task.steps[j]] = [task.steps[j], task.steps[idx]]; drawSteps(); };
     return h('div', { class: 'step', dataset: { type: step.type, group: env.groupOf[step.type] || '' } },
       h('div', { class: 'step-head' },

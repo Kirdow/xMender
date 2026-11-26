@@ -135,6 +135,7 @@ blocks deleting them).
 | `filter_sender` | filter | first time / seen before / at least N in D days, from `RunContext.sender_seen` (the poller loads earlier `Email.created_at` for the same `sender_addr`); outputs `seen_count` |
 | `filter_phishing` | filter | `services/signals.py`: auth fail (only the topmost `Authentication-Results` from `mx.google.com` is trusted), Reply-To domain mismatch, address in display name, protected-name mismatch, free mail; `min_signals` threshold; outputs `signals`, `count` |
 | `filter_agent` | filter | LLM verdict; matches only if the reply ends with exactly `FILTER MATCH` |
+| `template_post` | action | Discord embed from `title`/`body`/`footer` templates (`services/template.py`); no LLM |
 | `webhook_agent` | action | LLM writes the text; posted as an embed titled `xMender Notification`, colour `0x00FFFF` |
 
 The engine (`pipeline.py`) owns the options every step shares. They are stored
@@ -149,6 +150,13 @@ only when not the default:
 - Filters only: `negate`, and `on_no_match: continue` (outcome `no-match`,
   `matched=false` recorded) instead of stopping. Every filter outputs
   `matched`.
+
+Templates (`services/template.py`): `{{email.field}}` or `{{step.field}}`
+plus modifiers `clip:N`, `default:x`, `oneline`, `upper`, `lower`. Values are
+inserted as plain text and never re-parsed. Save-time `template.check()`
+rejects unknown paths; a path with no value at run time renders empty and
+adds a `warning`. Renaming a step in the editor rewrites later conditions and
+`{{old.` placeholders.
 
 Run status: `completed`, `partial` (an error was continued past), `stopped`
 (a filter ended the chain) or `error`.
