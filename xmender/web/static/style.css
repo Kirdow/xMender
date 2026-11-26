@@ -442,3 +442,6 @@ a.docs-brand .muted { font-size: 0.85rem; }
   .docs-modal .docs { grid-template-rows: auto minmax(0, 1fr); }
   .docs-page-body, .docs-page-head { padding-left: 16px; padding-right: 16px; }
 }
+.tpl-docs { margin-top: 8px; }
+.tpl-docs svg, .nav-docs svg { width: 14px; height: 14px; }
+.nav .nav-docs svg { width: 16px; height: 16px; }

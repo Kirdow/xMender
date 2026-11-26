@@ -49,6 +49,8 @@ const ICONS = {
   refresh: ['M21 12a9 9 0 1 1-2.6-6.4', 'M21 3v6h-6'],
   chevron: ['M6 9l6 6 6-6'],
   eye: ['M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z', 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z'],
+  docs: ['M4 19.5A2.5 2.5 0 0 1 6.5 17H20', 'M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z', 'M9 7h7', 'M9 11h5'],
+  external: ['M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6', 'M15 3h6v6', 'M10 14L21 3'],
 };
 
 /* Eye button that calls show(true) while held (mouse, touch or Space/Enter) and
@@ -165,6 +167,36 @@ function modal(title, lead, body, actions) {
   return close;
 }
 
+// ── Docs ────────────────────────────────────────────────────────────────────
+/* The docs content lives in /static/docs/*.md and is rendered by docs.js
+   (XDocs), which the standalone /docs page uses too. `addr` is "section" or
+   "section/heading-id", as in /docs#addr. */
+function openDocs(addr) {
+  const ext = h('a', { class: 'btn small', href: '/docs' + (addr ? '#' + addr : ''), target: '_blank', rel: 'noopener', title: 'Open the docs in a new tab' },
+    'New tab', icon(ICONS.external));
+  const body = h('div', { class: 'docs-modal-body' });
+  const box = h('div', { class: 'modal docs-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Documentation' },
+    h('div', { class: 'docs-modal-head' }, h('h3', {}, 'Docs'), ext,
+      h('button', { class: 'ghost small', title: 'Close', 'aria-label': 'Close docs', onclick: () => close() }, '✕')),
+    body);
+  const back = h('div', { class: 'modal-backdrop docs-backdrop', onmousedown: (e) => { if (e.target === back) close(); } }, box);
+  const esc = (e) => { if (e.key === 'Escape') close(); };
+  function close() { back.remove(); document.removeEventListener('keydown', esc); }
+  document.addEventListener('keydown', esc);
+  document.body.append(back);
+  XDocs.mount(body, { start: addr, focusSearch: !addr, onChange: (a) => { ext.href = '/docs#' + a; } });
+}
+
+// A link that opens the docs modal on a plain click (ctrl/middle click: new tab).
+function docsLink(addr, ...label) {
+  return h('a', { href: '/docs#' + addr, onclick: (e) => {
+    if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openDocs(addr);
+  } }, ...label);
+}
+
 function confirmDialog(title, text, okLabel, danger) {
   return new Promise((resolve) => {
     modal(title, null, h('p', { class: 'small' }, text), (close) => [
@@ -242,7 +274,15 @@ function sidebar(active) {
   return h('nav', { class: 'sidebar', 'aria-label': 'Sidebar' },
     h('div', { class: 'sidebar-brand' }, h('span', { class: 'wordmark' }, 'xMender'), h('small', {}, 'everyday automation')),
     h('div', { class: 'nav' }, ROUTES.filter(allowed).map((r) =>
-      h('a', { href: '#/' + r.path, class: r.path === active ? 'active' : '' }, icon(ICONS[r.icon]), h('span', {}, r.label)))),
+      h('a', { href: '#/' + r.path, class: r.path === active ? 'active' : '' }, icon(ICONS[r.icon]), h('span', {}, r.label))),
+    h('div', { class: 'nav-sep', role: 'separator' }),
+    h('div', { class: 'nav-docs' },
+      h('a', { href: '/docs', class: 'docs-open', title: 'Open the docs here', onclick: (e) => {
+        if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        openDocs();
+      } }, icon(ICONS.docs), h('span', {}, 'Docs')),
+      h('a', { href: '/docs', class: 'docs-ext', target: '_blank', rel: 'noopener', title: 'Open the docs in a new tab', 'aria-label': 'Open the docs in a new tab' }, icon(ICONS.external)))),
     h('div', { class: 'user-bar' },
       h('div', { class: 'avatar' }, S.me.username.slice(0, 2)),
       h('div', { class: 'who' }, S.me.username, h('small', {}, S.me.is_root ? 'owner' : S.me.is_admin ? 'admin' : 'user')),
@@ -823,7 +863,8 @@ function templateHelp(env) {
   return h('details', { class: 'tpl-help' },
     h('summary', {}, 'Placeholders'),
     h('div', { class: 'chips' }, vars.map((v) => h('button', { type: 'button', class: 'chip', onclick: () => insert(v) }, v))),
-    h('div', { class: 'hint' }, 'Write {{step.field}} to insert a value. Modifiers: {{email.body | clip:500}}, {{x.y | default:none}}, | oneline, | upper, | lower. Name an earlier step to use its outputs; a chained task can also use the named steps of the tasks it runs after.'));
+    h('div', { class: 'hint' }, 'Write {{step.field}} to insert a value. Modifiers: {{email.body | clip:500}}, {{x.y | default:none}}, | oneline, | upper, | lower. Name an earlier step to use its outputs; a chained task can also use the named steps of the tasks it runs after.'),
+    h('div', { class: 'tpl-docs' }, h('button', { type: 'button', class: 'small', onclick: () => openDocs('placeholders') }, icon(ICONS.docs), 'Open placeholder docs')));
 }
 
 function templateInput(c, key, env, multiline, placeholder) {
@@ -1160,7 +1201,8 @@ function whenField(step, idx, env) {
   }
   stepSel.addEventListener('change', draw);
   draw();
-  return field('Run this step', box, prior.length ? null : 'Name an earlier step to run this one only in some cases.');
+  return field('Run this step', box, h('span', {}, prior.length ? null : 'Name an earlier step to run this one only in some cases. ',
+    docsLink('step-options/run-this-step', 'How conditions work')));
 }
 
 function stepOptions(step, idx, env) {
@@ -1269,7 +1311,8 @@ async function viewTaskEditor(main, id) {
   });
   inbox.addEventListener('change', () => { drawChain(); drawSteps(); });
   drawChain();
-  const chainSec = h('div', {}, field('Run after another task', parentSel), chainHint);
+  const chainSec = h('div', {}, field('Run after another task', parentSel), chainHint,
+    h('div', { class: 'hint' }, docsLink('chains', 'How task chains work')));
   const err = h('p', { class: 'error-box hidden' });
 
   function stepForm(step, idx) {
@@ -1281,6 +1324,7 @@ async function viewTaskEditor(main, id) {
         h('div', { class: 'title' }, h('span', { class: 'n' }, `#${idx + 1}`), label[step.type] || step.type,
           step.name ? h('span', { class: 'chip step-name' }, step.name) : null),
         h('div', { class: 'btn-row' },
+          h('button', { class: 'ghost small', title: `Help: ${label[step.type] || step.type}`, 'aria-label': 'Help for this step', onclick: () => openDocs('steps/' + step.type) }, '?'),
           h('button', { class: 'ghost small', title: 'Move up', 'aria-label': 'Move up', disabled: idx === 0, onclick: move(-1) }, '↑'),
           h('button', { class: 'ghost small', title: 'Move down', 'aria-label': 'Move down', disabled: idx === task.steps.length - 1, onclick: move(1) }, '↓'),
           h('button', { class: 'ghost small', title: 'Remove', 'aria-label': 'Remove step', onclick: () => { task.steps.splice(idx, 1); drawSteps(); } }, '✕'))),
