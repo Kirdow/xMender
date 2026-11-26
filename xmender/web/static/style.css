@@ -333,6 +333,7 @@ code { background: var(--faint); padding: 1px 5px; border-radius: 4px; font-size
 /* ── Hold-to-reveal ── */
 .reveal-wrap { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
 .reveal-wrap .masked { overflow-wrap: anywhere; }
+.gmail-sub { display: inline-flex; flex-wrap: wrap; align-items: center; column-gap: 6px; }
 button.reveal { padding: 2px 6px; line-height: 0; background: transparent; border-color: transparent; color: var(--muted); touch-action: none; user-select: none; -webkit-user-select: none; }
 button.reveal svg { width: 15px; height: 15px; display: block; }
 button.reveal:hover, button.reveal.active { color: var(--primary); }

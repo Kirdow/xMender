@@ -891,6 +891,14 @@ def test_mask_email():
     assert key_prefix("sk-ant-…abcd") == "sk-ant-" and key_prefix("••••") == ""
 
 
+def test_mask_name():
+    from xmender.masking import mask_name
+
+    assert mask_name("John Doe") == "J*** D**"
+    assert mask_name("Jo  A") == "J*  A"
+    assert mask_name("") == "" and mask_name(None) == ""
+
+
 def test_chain_order_and_inheritance():
     from xmender.services import chains
 

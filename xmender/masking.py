@@ -6,6 +6,8 @@ Only the Integrations page also receives the revealable form.
 
 from __future__ import annotations
 
+import re
+
 ANTHROPIC_KEY_PREFIX = "sk-ant-"
 
 
@@ -22,6 +24,11 @@ def mask_email(addr: str | None) -> str:
     else:
         masked = base[0] + "*" * (len(base) - 2) + base[-1]
     return f"{masked}{plus}{tag}{at}{domain}"
+
+
+def mask_name(name: str | None) -> str:
+    """`John Doe` -> `J*** D**`: first character of each word kept, spacing kept."""
+    return re.sub(r"\S+", lambda m: m.group()[0] + "*" * (len(m.group()) - 1), name or "")
 
 
 def key_prefix(hint: str | None) -> str:

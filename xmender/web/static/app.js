@@ -467,14 +467,14 @@ async function viewIntegrations(main) {
     httpCards.length ? httpCards : h('div', { class: 'empty' }, 'No HTTP webhook yet. Use one to send mail data to ntfy, Slack, Home Assistant or your own service.'));
 }
 
+// Address and From name, each with its own eye. From is omitted when it would
+// just repeat the address (no display name set).
 function gmailSub(g) {
-  const text = h('span', { class: 'masked' });
-  const show = (full) => {
-    const addr = full ? g.email : g.email_masked;
-    text.textContent = `${addr} · From: ${g.display_name || addr}`;
-  };
-  show(false);
-  return h('span', { class: 'reveal-wrap' }, text, holdToReveal(show, 'address'));
+  const name = (g.display_name || '').trim();
+  const addr = revealText(g.email_masked, g.email, 'address');
+  if (!name || name.toLowerCase() === (g.email || '').toLowerCase()) return addr;
+  return h('span', { class: 'gmail-sub' }, addr, h('span', {}, '· From:'),
+    revealText(g.display_name_masked, g.display_name, 'From name'));
 }
 
 async function deleteIntegration(id, name, reload) {

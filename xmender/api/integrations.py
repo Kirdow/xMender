@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
-from ..masking import key_prefix, mask_email
+from ..masking import key_prefix, mask_email, mask_name
 from ..models import Integration, Task, User
 from ..security import decrypt, encrypt
 from ..services import discord, gmail, http_hook, llm, pipeline
@@ -41,6 +41,7 @@ def _gmail_dict(i: Integration) -> dict[str, Any]:
         "email": c.get("email"),
         "email_masked": mask_email(c.get("email")),
         "display_name": c.get("display_name") or "",
+        "display_name_masked": mask_name(c.get("display_name")),
         "smtp_enabled": bool(c.get("smtp_enabled")),
         "imap_host": c.get("imap_host"),
         "imap_port": c.get("imap_port"),
