@@ -597,15 +597,17 @@ const STEP_DEFAULTS = {
     attachment_ext: '', attachment_name: '', attachment_type: '', attachment_min_kb: null, attachment_max_kb: null }),
   filter_bulk: () => ({ kinds: ['newsletter', 'bulk', 'noreply'] }),
   filter_time: () => ({ days: [0, 1, 2, 3, 4], start: '09:00', end: '17:00', timezone: '' }),
+  filter_sender: () => ({ mode: 'first_time', count: 3, days: 7 }),
   filter_agent: () => ({ instructions: '', model: null }),
   webhook_agent: () => ({ instructions: '', model: null, discord_integration_id: null }),
 };
 // Default step names on add; a number is appended when taken.
-const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_agent: 'ai_filter', webhook_agent: 'notify' };
+const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_sender: 'sender', filter_agent: 'ai_filter', webhook_agent: 'notify' };
 // Output fields per type, mirroring the server. Filters also output `matched`.
 const STEP_OUTPUTS = {
   filter_bulk: () => ['signals'],
   filter_time: () => ['local_time'],
+  filter_sender: () => ['seen_count'],
 };
 const COND_OPS = [['equals', 'equals'], ['not_equals', 'does not equal'], ['contains', 'contains'],
   ['in', 'is one of'], ['not_in', 'is not one of'], ['is_set', 'is set'], ['is_empty', 'is empty']];
@@ -722,6 +724,21 @@ const STEP_FORMS = {
         field('Until', bindIn(c, 'end', h('input', { type: 'time', value: c.end || '00:00' }))),
         field('Time zone', zone)),
       h('div', { class: 'hint' }, 'Matches mail processed inside the window. Same start and end means the whole day; an end before the start runs past midnight. Invert it (Options) for "outside these hours".'),
+    ];
+  },
+  filter_sender(c) {
+    const num = (v) => (v.trim() === '' ? null : Number(v));
+    const freq = h('div', { class: 'grid-2' },
+      field('At least this many earlier emails', bindIn(c, 'count', h('input', { type: 'number', min: 1, max: 1000, value: c.count ?? 3 }), num)),
+      field('Within the last (days)', bindIn(c, 'days', h('input', { type: 'number', min: 1, max: 3650, value: c.days ?? '', placeholder: 'any time' }), num)));
+    const sync = () => freq.classList.toggle('hidden', c.mode !== 'frequent');
+    const mode = choice([['first_time', 'First email from this sender'], ['seen_before', 'Sender has written before'],
+      ['frequent', 'Sender writes often']], c.mode || 'first_time', (v) => { c.mode = v; sync(); });
+    sync();
+    return [
+      field('Match when', mode),
+      freq,
+      h('div', { class: 'hint' }, 'Compares the From address with mail xMender has already processed for this inbox, so history starts when the inbox was connected. Invert "writes often" to rate-limit a noisy sender.'),
     ];
   },
   filter_agent(c, env) {

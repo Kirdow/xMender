@@ -36,6 +36,9 @@ class RunContext:
     timezone: str | None = None
     # Fixed clock for tests; None means the real time.
     now: datetime | None = None
+    # Arrival times (UTC, newest first) of earlier mail from the same sender
+    # address in this inbox, excluding the current email. Capped.
+    sender_seen: list[datetime] = field(default_factory=list)
 
 
 @dataclass

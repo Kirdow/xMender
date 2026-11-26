@@ -147,3 +147,24 @@ def test_my_settings_partial_update(admin):
     assert me["timezone"] == "Europe/Stockholm" and me["default_model"] == "claude-opus-5-5"
     assert admin.put("/api/me/settings", json={"timezone": "Mars/Base"}).status_code == 400
     assert admin.get("/api/auth/state").json()["user"]["timezone"] == "Europe/Stockholm"
+
+
+def test_poller_passes_sender_history(admin, monkeypatch):
+    from email.message import EmailMessage
+
+    from xmender.services import pipeline, poller
+
+    msg = EmailMessage()
+    msg["From"] = "Billing <BILLING@shop.com>"
+    msg["To"] = "me@gmail.com"
+    msg["Subject"] = "Invoice 8"
+    msg.set_content("Amount due: 12")
+    gid = admin.get("/api/integrations").json()["gmail"][0]["id"]
+    monkeypatch.setattr(gmail, "fetch_new", lambda acct, v, last, limit: gmail.FetchResult(
+        uidvalidity=5, last_uid=last, messages=[(102, msg.as_bytes())]))
+    seen = []
+    monkeypatch.setattr(pipeline, "run_task", lambda steps, mail, ctx: (
+        seen.append(ctx.sender_seen) or pipeline.RunResult("completed", [])))
+    poller.poll_integration(gid)
+    # invoice 7 from the same address (different case) came earlier
+    assert len(seen[0]) == 1 and seen[0][0].tzinfo is not None

@@ -411,3 +411,22 @@ def test_time_window():
     for bad in ({"days": []}, {"days": [1], "start": "9am"}, {"days": [1], "timezone": "Mars/Base"}):
         with pytest.raises(pipeline.StepConfigError):
             _v([{"type": "filter_time", "config": bad}])
+
+
+def test_sender_history_filter():
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime(2026, 11, 27, 12, 0, tzinfo=UTC)
+    seen = [now - timedelta(days=d) for d in (1, 2, 10)]
+    run = lambda cfg, seen: pipeline.run_task(  # noqa: E731
+        _v([{"type": "filter_sender", "name": "s", "config": cfg}]), make_mail(),
+        pipeline.RunContext(None, None, now=now, sender_seen=seen))
+    assert run({"mode": "first_time"}, []).status == "completed"
+    assert run({"mode": "first_time"}, seen).status == "stopped"
+    assert run({"mode": "seen_before"}, seen).vars["s"]["seen_count"] == 3
+    assert run({"mode": "frequent", "count": 2, "days": 7}, seen).status == "completed"
+    assert run({"mode": "frequent", "count": 3, "days": 7}, seen).status == "stopped"
+    assert run({"mode": "frequent", "count": 3, "days": None}, seen).status == "completed"
+    for bad in ({"mode": "x"}, {"mode": "frequent", "count": 0}, {"mode": "frequent", "count": 1, "days": "a"}):
+        with pytest.raises(pipeline.StepConfigError):
+            _v([{"type": "filter_sender", "config": bad}])

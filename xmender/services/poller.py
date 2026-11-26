@@ -11,11 +11,13 @@ from sqlalchemy.exc import IntegrityError
 
 from ..config import get_settings
 from ..db import session_scope
-from ..models import Email, Integration, Task, TaskRun, User, utcnow
+from ..models import Email, Integration, Task, TaskRun, User, as_utc, utcnow
 from . import gmail, pipeline, usage
 from .accounts import gmail_account, run_context
 
 log = logging.getLogger(__name__)
+
+SENDER_HISTORY_LIMIT = 1000
 
 
 def poll_integration(integration_id: int) -> dict[str, Any]:
@@ -104,6 +106,16 @@ def _process_message(integration_id: int, uidvalidity: int, uid: int, raw: bytes
             )
         )
         ctx = run_context(db, user)
+        if mail.from_addr:
+            ctx.sender_seen = [
+                as_utc(t) for t in db.scalars(
+                    select(Email.created_at)
+                    .where(Email.integration_id == integration_id,
+                           Email.sender_addr == mail.from_addr[:320], Email.id != email_id)
+                    .order_by(Email.created_at.desc())
+                    .limit(SENDER_HISTORY_LIMIT)
+                )
+            ]
         jobs = [(t.id, t.name, list(t.steps)) for t in tasks]
 
     # LLM and webhook calls happen outside any DB transaction.

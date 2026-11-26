@@ -132,6 +132,7 @@ blocks deleting them).
 | `filter_builtin` | filter | `services/filters.py`, Gmail-like fields; optional regex mode (`regex` package, per-search timeout) and attachment details |
 | `filter_bulk` | filter | `services/signals.py`: List-Unsubscribe/List-Id, Precedence/Auto-Submitted/Feedback-ID, no-reply sender; outputs `signals` |
 | `filter_time` | filter | `services/timewindow.py`: days + HH:MM window in the step's zone, else `User.timezone`, else UTC; uses processing time, not the Date header |
+| `filter_sender` | filter | first time / seen before / at least N in D days, from `RunContext.sender_seen` (the poller loads earlier `Email.created_at` for the same `sender_addr`); outputs `seen_count` |
 | `filter_agent` | filter | LLM verdict; matches only if the reply ends with exactly `FILTER MATCH` |
 | `webhook_agent` | action | LLM writes the text; posted as an embed titled `xMender Notification`, colour `0x00FFFF` |
 
