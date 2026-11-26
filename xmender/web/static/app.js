@@ -963,10 +963,31 @@ const STEP_FORMS = {
     ];
   },
   webhook_agent(c, env) {
+    const titleHints = {
+      '': 'Every embed is titled "xMender Notification".',
+      generate: 'The model also writes a short title about the email, in the same call.',
+      template: '',
+    };
+    const titleHint = h('div', { class: 'hint' });
+    const titleBox = h('div', {});
+    const drawTitle = () => {
+      const mode = c.title_mode || '';
+      titleHint.textContent = titleHints[mode];
+      titleBox.replaceChildren(...(mode === 'template'
+        ? [field('Title template', templateInput(c, 'title', env, false, '{{email.subject}}')), templateHelp(env)]
+        : []));
+    };
+    const titleField = h('div', { class: 'field' }, h('label', {}, 'Embed title'),
+      choice([['', 'Default'], ['generate', 'Written by the model'], ['template', 'Template']],
+        c.title_mode || '', (v) => { c.title_mode = v || null; drawTitle(); }),
+      titleHint);
+    drawTitle();
     return [
       discordSelect(c, env),
       instructionsField(c, 'Describe the notification. e.g. "Summarise in 2 bullet points and list any due dates."',
-        'The model\'s reply is posted as an aqua embed titled "xMender Notification".'),
+        'The model\'s reply is posted as an aqua embed.'),
+      titleField,
+      titleBox,
       attachmentsField(c),
       modelField(c, env),
     ];

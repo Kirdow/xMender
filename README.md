@@ -114,7 +114,7 @@ A task belongs to one Gmail inbox and is an ordered chain of steps.
 
 | Step | Does |
 |---|---|
-| Webhook (Agent) | The LLM writes a notification from your instructions; posted as an aqua embed titled `xMender Notification`. |
+| Webhook (Agent) | The LLM writes a notification from your instructions; posted as an aqua embed. The title is `xMender Notification` by default, or written by the model, or a template. |
 | Template post (Discord) | Posts a Discord embed filled from a template; no LLM. |
 | HTTP webhook | Sends a JSON or text body to an HTTP integration (ntfy, Slack, Home Assistant, ...). |
 

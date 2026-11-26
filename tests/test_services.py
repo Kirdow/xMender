@@ -300,6 +300,53 @@ def test_engine_branching_and_continue(monkeypatch):
     assert res.status == "partial" and [e["outcome"] for e in res.log] == ["error", "sent"]
 
 
+def test_webhook_agent_title_modes(monkeypatch):
+    from xmender.services.steps import webhook_agent
+
+    assert webhook_agent.split_title("Title: Invoice #42 due\n\nPay $10.") == ("Invoice #42 due", "Pay $10.")
+    assert webhook_agent.split_title("**Title:** **Hi**\nbody") == ("Hi", "body")
+    assert webhook_agent.split_title("just text") == (None, "just text")
+
+    with pytest.raises(pipeline.StepConfigError):
+        _v([{"type": "webhook_agent", "config": {"instructions": "x", "discord_integration_id": 7,
+                                                 "title_mode": "template", "title": " "}}])
+    with pytest.raises(pipeline.StepConfigError):
+        _v([{"type": "webhook_agent", "config": {"instructions": "x", "discord_integration_id": 7,
+                                                 "title_mode": "nope"}}])
+
+    p = prompts.webhook_agent_prompt("x", make_mail(), 100, title_chars=80)
+    assert "Title: " in p.system and "xMender Notification" not in p.system
+    assert "xMender Notification" in prompts.webhook_agent_prompt("x", make_mail(), 100).system
+
+    reply = ["Title: Invoice 42\n\nbody"]
+    monkeypatch.setattr(llm, "complete", lambda key, model, s, u, **kw: llm.LLMResult(
+        reply[0], "end_turn", model))
+    sent = []
+    monkeypatch.setattr(discord, "send_embed", lambda url, **kw: sent.append(kw))
+    ctx = pipeline.RunContext(api_key="k", default_model="d", discord={7: ("A", "https://a")})
+    base = {"instructions": "x", "discord_integration_id": 7}
+
+    gen = _v([{"type": "webhook_agent", "config": {**base, "title_mode": "generate"}}])
+    assert gen[0]["config"]["title_mode"] == "generate" and "title" not in gen[0]["config"]
+    pipeline.run_task(gen, make_mail(), ctx)
+    assert sent[-1]["title"] == "Invoice 42" and sent[-1]["description"] == "body"
+
+    reply[0] = "no title line"
+    res = pipeline.run_task(gen, make_mail(), ctx)
+    assert sent[-1]["title"] is None and sent[-1]["description"] == "no title line"
+    assert "no title" in res.log[0]["warning"]
+
+    tpl = _v([{"type": "webhook_agent",
+               "config": {**base, "title_mode": "template", "title": "Mail: {{email.subject}}"}}])
+    pipeline.run_task(tpl, make_mail(), ctx)
+    assert sent[-1]["title"] == "Mail: Your invoice #42" and sent[-1]["description"] == "no title line"
+
+    plain = _v([{"type": "webhook_agent", "config": {**base, "title": "ignored"}}])
+    assert "title_mode" not in plain[0]["config"] and "title" not in plain[0]["config"]
+    pipeline.run_task(plain, make_mail(), ctx)
+    assert sent[-1]["title"] is None
+
+
 def test_conditions():
     st = pipeline.RunState(vars={"c": {"label": "Invoice", "n": 3, "flag": False, "empty": None}})
     hold = lambda **w: pipeline.condition_holds({"step": "c", **w}, st)  # noqa: E731

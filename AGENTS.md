@@ -152,7 +152,7 @@ blocks deleting them).
 | `classify_agent` | agent | picks one of the user's categories (enum via structured outputs) or `other`; unknown answers become `other`; outputs `label`, `reason` |
 | `extract_agent` | agent | user-defined fields (`string`/`number`/`integer`/`boolean`/`date`) as JSON; structured outputs when supported, always coerced/validated in code; missing required field = error; outputs the field names |
 | `http_post` | action | JSON (placeholders only inside strings; a lone `"{{x.y}}"` keeps its type) or text body to an HTTP integration; outputs `status` |
-| `webhook_agent` | action | LLM writes the text; posted as an embed titled `xMender Notification`, colour `0x00FFFF` |
+| `webhook_agent` | action | LLM writes the text; posted as an embed, colour `0x00FFFF`. Title per `title_mode`: unset = `xMender Notification`, `generate` = model's first line `Title: ...` (same call; missing line = default + warning), `template` = `title` template |
 
 The engine (`pipeline.py`) owns the options every step shares. They are stored
 only when not the default:

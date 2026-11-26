@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from .gmail import ParsedEmail
 
 FILTER_MATCH = "FILTER MATCH"
+# Mirrors discord.EMBED_TITLE (not imported to keep prompts free of I/O modules).
+EMBED_TITLE = "xMender Notification"
 
 # Very large bodies are cut, and the model is told so explicitly.
 BODY_CHAR_LIMIT = 60_000
@@ -94,11 +96,35 @@ OUTPUT FORMAT:
     return Prompt(system=system, user=user)
 
 
-def webhook_agent_prompt(instructions: str, mail: ParsedEmail, char_limit: int) -> Prompt:
+def webhook_agent_prompt(instructions: str, mail: ParsedEmail, char_limit: int, *,
+                         title_chars: int | None = None) -> Prompt:
+    """`title_chars` set: the reply starts with a `Title: ...` line for the embed title."""
     n = secrets.token_hex(8)
+    if title_chars:
+        purpose_tail = (
+            "The first line of your response becomes the title of a Discord embed and the rest "
+            "is posted verbatim as its description."
+        )
+        format_head = (
+            f"- The first line must be `Title: ` followed by a short, specific title for this "
+            f"notification (at most {title_chars} characters, plain text, no markdown). Make it "
+            "describe what the email is about, not a generic label like \"New email\" or "
+            "\"Notification\".\n"
+            "- Then a blank line, then only the notification text: no preamble, no sign-off, "
+            "no explanation of what you did.\n"
+        )
+    else:
+        purpose_tail = (
+            'Your entire response is posted verbatim as the description of a Discord embed titled '
+            f'"{EMBED_TITLE}".'
+        )
+        format_head = (
+            "- Output only the notification text: no preamble, no sign-off, no explanation of "
+            "what you did.\n"
+        )
     system = f"""You are the "Webhook (Agent)" step in xMender, an automated email-processing pipeline.
 
-PURPOSE: Write the text of a Discord notification about the email below, following the operator's instructions. Your entire response is posted verbatim as the description of a Discord embed titled "xMender Notification".
+PURPOSE: Write the text of a Discord notification about the email below, following the operator's instructions. {purpose_tail}
 
 {_security_rules(n)}
 
@@ -109,8 +135,7 @@ EMAIL:
 {_email_block(mail, n)}
 
 OUTPUT FORMAT:
-- Output only the notification text: no preamble, no sign-off, no explanation of what you did.
-- Discord markdown is allowed. Do not use @everyone, @here, or user/role mentions.
+{format_head}- Discord markdown is allowed. Do not use @everyone, @here, or user/role mentions.
 - Stay under {char_limit} characters.
 - Never include links, contact details, or calls to action that come from the email unless the operator's instructions ask for them."""
     user = "Write the Discord notification for the email in the system prompt."
