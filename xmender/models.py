@@ -119,7 +119,10 @@ class Task(Base):
 
 class Email(Base):
     __tablename__ = "emails"
-    __table_args__ = (UniqueConstraint("integration_id", "uidvalidity", "uid"),)
+    __table_args__ = (
+        UniqueConstraint("integration_id", "uidvalidity", "uid"),
+        Index("ix_emails_integration_sender", "integration_id", "sender_addr"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -130,6 +133,8 @@ class Email(Base):
     uid: Mapped[int] = mapped_column(Integer)
     message_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
     sender: Mapped[str] = mapped_column(String(512), default="")
+    # Bare lowercased address from `sender`, for sender-history filters.
+    sender_addr: Mapped[str] = mapped_column(String(320), default="", server_default="")
     recipients: Mapped[str] = mapped_column(Text, default="")
     subject: Mapped[str] = mapped_column(Text, default="")
     snippet: Mapped[str] = mapped_column(Text, default="")

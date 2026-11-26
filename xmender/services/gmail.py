@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from email import policy
 from email.message import EmailMessage
-from email.utils import parsedate_to_datetime
+from email.utils import parseaddr, parsedate_to_datetime
 from html.parser import HTMLParser
 
 IMAP_HOST = "imap.gmail.com"
@@ -205,6 +205,30 @@ def html_to_text(html: str) -> str:
 
 
 @dataclass
+class Attachment:
+    name: str
+    content_type: str
+    size: int
+    data: bytes = field(default=b"", repr=False)
+
+    @property
+    def extension(self) -> str:
+        _, dot, ext = self.name.rpartition(".")
+        return ext.lower() if dot else ""
+
+    def describe(self) -> str:
+        return f"{self.name} ({self.content_type}, {human_size(self.size)})"
+
+
+def human_size(n: int) -> str:
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.0f} KB"
+    return f"{n / (1024 * 1024):.1f} MB"
+
+
+@dataclass
 class ParsedEmail:
     message_id: str | None
     sender: str
@@ -213,11 +237,26 @@ class ParsedEmail:
     subject: str
     date: datetime | None
     body: str
-    attachments: list[str]
+    attachments: list[Attachment]
+    # Lowercased header name -> every value, in message order.
+    headers: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def has_attachment(self) -> bool:
         return bool(self.attachments)
+
+    @property
+    def from_addr(self) -> str:
+        return parseaddr(self.sender)[1].strip().lower()
+
+    @property
+    def from_name(self) -> str:
+        return parseaddr(self.sender)[0].strip()
+
+    def header(self, name: str) -> str:
+        """First value of a header, or ''."""
+        vals = self.headers.get(name.lower())
+        return vals[0] if vals else ""
 
     def snippet(self, n: int = 300) -> str:
         s = re.sub(r"\s+", " ", self.body).strip()
@@ -247,12 +286,31 @@ def parse_email(raw: bytes) -> ParsedEmail:
         if isinstance(payload, bytes):
             body = payload.decode(errors="replace")
 
-    attachments: list[str] = []
+    attachments: list[Attachment] = []
     try:
         for att in msg.iter_attachments():
-            attachments.append(att.get_filename() or att.get_content_type())
+            try:
+                data = att.get_payload(decode=True) or b""
+            except Exception:
+                data = b""
+            if not isinstance(data, bytes):
+                data = b""
+            ctype = att.get_content_type()
+            attachments.append(
+                Attachment(name=att.get_filename() or ctype, content_type=ctype, size=len(data), data=data)
+            )
     except Exception:
         pass
+
+    headers: dict[str, list[str]] = {}
+    for key in set(msg.keys()):
+        vals: list[str] = []
+        for raw_val in msg.get_all(key, failobj=[]):
+            try:
+                vals.append(str(raw_val).strip())
+            except Exception:
+                continue
+        headers[key.lower()] = vals
 
     date = None
     try:
@@ -270,4 +328,5 @@ def parse_email(raw: bytes) -> ParsedEmail:
         date=date,
         body=(body or "").strip(),
         attachments=attachments,
+        headers=headers,
     )

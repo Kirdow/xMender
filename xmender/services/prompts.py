@@ -40,7 +40,7 @@ def _email_block(mail: ParsedEmail, nonce: str) -> str:
     if len(body) > BODY_CHAR_LIMIT:
         body = body[:BODY_CHAR_LIMIT]
         note = f"\n[xMender note: body truncated to the first {BODY_CHAR_LIMIT} characters]"
-    attachments = ", ".join(mail.attachments) if mail.attachments else "none"
+    attachments = ", ".join(a.describe() for a in mail.attachments) if mail.attachments else "none"
     fields = (
         f"From: {mail.sender}\n"
         f"To: {mail.to}\n"

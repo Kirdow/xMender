@@ -28,7 +28,7 @@ def test_filter_alternatives_and_words():
 def test_filter_attachment():
     cfg = filters.normalize_config({"has_attachment": True})
     assert not filters.matches(cfg, make_mail())[0]
-    assert filters.matches(cfg, make_mail(attachments=["a.pdf"]))[0]
+    assert filters.matches(cfg, make_mail(attachments=[gmail.Attachment("a.pdf", "application/pdf", 3)]))[0]
     assert filters.is_empty(filters.normalize_config({}))
 
 
@@ -95,7 +95,9 @@ def test_parse_html_email_with_attachment():
     msg.add_attachment(b"data", maintype="application", subtype="pdf", filename="f.pdf")
     p = gmail.parse_email(msg.as_bytes())
     assert p.subject == "Hi" and "Hello there" in p.body and "x{}" not in p.body
-    assert p.attachments == ["f.pdf"]
+    [a] = p.attachments
+    assert (a.name, a.content_type, a.size, a.data, a.extension) == ("f.pdf", "application/pdf", 4, b"data", "pdf")
+    assert p.from_addr == "a@b.com" and p.from_name == "A" and p.header("SUBJECT") == "Hi"
 
 
 # --- pipeline ---

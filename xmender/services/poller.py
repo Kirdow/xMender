@@ -83,6 +83,7 @@ def _process_message(integration_id: int, uidvalidity: int, uid: int, raw: bytes
             uid=uid,
             message_id=(mail.message_id or "")[:512] or None,
             sender=mail.sender[:512],
+            sender_addr=mail.from_addr[:320],
             recipients=mail.to,
             subject=mail.subject,
             snippet=mail.snippet(),
