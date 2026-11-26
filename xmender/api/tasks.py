@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Integration, Task, User
-from ..services import llm, pipeline
+from ..services import llm, pipeline, signals
 from ..services.accounts import anthropic_key, discord_ids
 from .deps import require
 
@@ -53,6 +53,7 @@ def meta(db: Session = Depends(get_db), user: User = Depends(require("tasks"))):
         "discord": dc,
         "has_anthropic": anthropic_key(db, user.id) is not None,
         "default_model": user.default_model,
+        "bulk_kinds": [{"key": k, "label": v} for k, v in signals.BULK_KINDS.items()],
     }
 
 

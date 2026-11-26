@@ -358,3 +358,22 @@ def test_filter_attachment_detail():
                 {"has_attachment": False, "attachment_ext": "pdf"}):
         with pytest.raises(ValueError):
             filters.normalize_config(bad)
+
+
+def test_bulk_filter():
+    from xmender.services import signals
+
+    news = make_mail(headers={"list-unsubscribe": ["<mailto:u@x>"]})
+    auto = make_mail(headers={"auto-submitted": ["auto-generated"]}, sender="Bot <no-reply@svc.io>")
+    assert signals.bulk_signals(news) == ["newsletter"]
+    assert signals.bulk_signals(auto) == ["bulk", "noreply"]
+    assert signals.bulk_signals(make_mail(headers={"auto-submitted": ["no"]})) == []
+    assert signals.bulk_signals(make_mail(sender="noreplyfan@x.com")) == []
+
+    steps = _v([{"type": "filter_bulk", "name": "b", "config": {"kinds": ["noreply", "junk"]}}])
+    assert steps[0]["config"] == {"kinds": ["noreply"]}
+    res = pipeline.run_task(steps, auto, pipeline.RunContext(None, None))
+    assert res.status == "completed" and res.vars["b"] == {"signals": "noreply", "matched": True}
+    assert pipeline.run_task(steps, news, pipeline.RunContext(None, None)).status == "stopped"
+    with pytest.raises(pipeline.StepConfigError):
+        _v([{"type": "filter_bulk", "config": {"kinds": []}}])

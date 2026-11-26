@@ -572,13 +572,16 @@ const GROUP_CHIP = { filter: 'aqua', agent: 'lime', action: 'pink' };
 const STEP_DEFAULTS = {
   filter_builtin: () => ({ from: '', to: '', subject: '', has_words: '', not_words: '', regex: false, has_attachment: null,
     attachment_ext: '', attachment_name: '', attachment_type: '', attachment_min_kb: null, attachment_max_kb: null }),
+  filter_bulk: () => ({ kinds: ['newsletter', 'bulk', 'noreply'] }),
   filter_agent: () => ({ instructions: '', model: null }),
   webhook_agent: () => ({ instructions: '', model: null, discord_integration_id: null }),
 };
 // Default step names on add; a number is appended when taken.
-const STEP_NAME_BASE = { filter_builtin: 'filter', filter_agent: 'ai_filter', webhook_agent: 'notify' };
+const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_agent: 'ai_filter', webhook_agent: 'notify' };
 // Output fields per type, mirroring the server. Filters also output `matched`.
-const STEP_OUTPUTS = {};
+const STEP_OUTPUTS = {
+  filter_bulk: () => ['signals'],
+};
 const COND_OPS = [['equals', 'equals'], ['not_equals', 'does not equal'], ['contains', 'contains'],
   ['in', 'is one of'], ['not_in', 'is not one of'], ['is_set', 'is set'], ['is_empty', 'is empty']];
 const VALUE_OPS = ['equals', 'not_equals', 'contains', 'in', 'not_in'];
@@ -598,6 +601,15 @@ function choice(options, value, onchange) {
   sel.value = value;
   sel.addEventListener('change', () => onchange(sel.value));
   return sel;
+}
+
+// Checkboxes for a list-valued config key; items are {key, label}.
+function checkList(items, c, key) {
+  if (!Array.isArray(c[key])) c[key] = [];
+  return h('div', { class: 'check-list' }, items.map((it) => h('label', { class: 'check' },
+    h('input', { type: 'checkbox', checked: c[key].includes(it.key), onchange: (e) => {
+      c[key] = e.target.checked ? [...new Set([...c[key], it.key])] : c[key].filter((k) => k !== it.key);
+    } }), it.label)));
 }
 
 function discordSelect(c, env) {
@@ -657,6 +669,12 @@ const STEP_FORMS = {
       hint,
       field('Attachment', att),
       details,
+    ];
+  },
+  filter_bulk(c, env) {
+    return [
+      checkList(env.meta.bulk_kinds, c, 'kinds'),
+      h('div', { class: 'hint' }, 'Matches when any checked signal is in the email\'s headers. Invert it (Options) to keep only personal mail.'),
     ];
   },
   filter_agent(c, env) {
