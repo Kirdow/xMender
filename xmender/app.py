@@ -54,6 +54,9 @@ def create_app(*, start_poller: bool = True) -> FastAPI:
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         if request.url.path.startswith("/api/"):
             response.headers.setdefault("Cache-Control", "no-store")
+        elif request.url.path.startswith("/static/"):
+            # Revalidate (ETag) so a changed app.js/style.css is picked up without a hard reload.
+            response.headers.setdefault("Cache-Control", "no-cache")
         return response
 
     for r in (auth.router, users.router, integrations.router, tasks.router, dashboard.router):

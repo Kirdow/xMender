@@ -55,10 +55,14 @@ const ICONS = {
    show(false) on release. Integrations page only; other pages never reveal. */
 function holdToReveal(show, label) {
   const btn = h('button', { type: 'button', class: 'reveal', title: `Hold to show ${label}`, 'aria-label': `Hold to show ${label}` }, icon(ICONS.eye));
-  const on = (e) => { if (e.button !== undefined && e.button !== 0) return; e.preventDefault(); btn.classList.add('active'); show(true); };
+  const on = (e) => { if (e.button !== undefined && e.button !== 0) return; e.preventDefault();
+    // Capture: release ends the hold wherever the pointer is. No pointerleave, since
+    // revealed text can resize and move the button out from under a held cursor.
+    if (e.pointerId !== undefined) { try { btn.setPointerCapture(e.pointerId); } catch { /* ignore */ } }
+    btn.classList.add('active'); show(true); };
   const off = () => { if (!btn.classList.contains('active')) return; btn.classList.remove('active'); show(false); };
   btn.addEventListener('pointerdown', on);
-  for (const ev of ['pointerup', 'pointerleave', 'pointercancel', 'blur']) btn.addEventListener(ev, off);
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture', 'blur']) btn.addEventListener(ev, off);
   btn.addEventListener('keydown', (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) on(e); });
   btn.addEventListener('keyup', (e) => { if (e.key === ' ' || e.key === 'Enter') off(); });
   btn.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -414,7 +418,7 @@ async function viewIntegrations(main) {
     h('div', { class: 'card-head' },
       h('div', {}, h('div', { class: 'card-title' }, 'Anthropic API'),
         h('div', { class: 'card-sub' }, anth
-          ? ['Key ', revealText(`${anth.key_prefix}••••••••`, anth.key_hint, 'key hint')]
+          ? ['Key ', revealText(anth.key_prefix + '•'.repeat(Math.max(4, anth.key_hint.length - anth.key_prefix.length)), anth.key_hint, 'key hint')]
           : 'Not connected. Needed for every agent step.')),
       h('button', { class: anth ? '' : 'primary', onclick: () => anthropicModal(reload) }, anth ? 'Replace key' : 'Connect')),
     anth ? h('div', { class: 'chips' }, h('span', { class: 'chip lime' }, 'connected')) : null);
