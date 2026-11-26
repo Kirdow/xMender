@@ -39,6 +39,8 @@ class Settings:
     secure_cookies: bool
     session_days: int
     log_level: str
+    # Let HTTP webhooks reach loopback/private/link-local addresses.
+    http_allow_private: bool = False
 
     @property
     def host(self) -> str:
@@ -68,4 +70,5 @@ def get_settings() -> Settings:
         secure_cookies=_bool(env.get("XMENDER_SECURE_COOKIES")),
         session_days=_int(env.get("XMENDER_SESSION_DAYS"), 14, 1, 365),
         log_level=(env.get("XMENDER_LOG_LEVEL") or "INFO").upper(),
+        http_allow_private=_bool(env.get("XMENDER_HTTP_ALLOW_PRIVATE")),
     )

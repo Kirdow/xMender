@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import Integration, Task, User
 from ..services import llm, pipeline, signals
-from ..services.accounts import anthropic_key, discord_ids
+from ..services.accounts import anthropic_key, discord_ids, http_ids
 from .deps import require
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -40,17 +40,18 @@ def _task_dict(t: Task) -> dict[str, Any]:
 @router.get("/meta")
 def meta(db: Session = Depends(get_db), user: User = Depends(require("tasks"))):
     rows = db.scalars(
-        select(Integration).where(Integration.user_id == user.id, Integration.kind.in_(("gmail", "discord")))
+        select(Integration).where(Integration.user_id == user.id, Integration.kind.in_(("gmail", "discord", "http")))
     )
-    gm, dc = [], []
+    gm, dc, hp = [], [], []
     for r in rows:
-        (gm if r.kind == "gmail" else dc).append(
+        {"gmail": gm, "discord": dc, "http": hp}[r.kind].append(
             {"id": r.id, "name": r.name, **({"email": r.config.get("email")} if r.kind == "gmail" else {})}
         )
     return {
         "step_types": pipeline.step_types_meta(),
         "gmail": gm,
         "discord": dc,
+        "http": hp,
         "has_anthropic": anthropic_key(db, user.id) is not None,
         "default_model": user.default_model,
         "bulk_kinds": [{"key": k, "label": v} for k, v in signals.BULK_KINDS.items()],
@@ -76,7 +77,10 @@ async def _validated(db: Session, user: User, body: TaskBody) -> list[dict[str, 
         except llm.LLMError:
             model_ids = None
     try:
-        steps = pipeline.validate_steps(body.steps, discord_ids=discord_ids(db, user.id), model_ids=model_ids)
+        steps = pipeline.validate_steps(
+            body.steps, discord_ids=discord_ids(db, user.id), model_ids=model_ids,
+            http_ids=http_ids(db, user.id),
+        )
     except pipeline.StepConfigError as e:
         raise HTTPException(400, str(e)) from e
     agent_steps = pipeline.llm_steps(steps)

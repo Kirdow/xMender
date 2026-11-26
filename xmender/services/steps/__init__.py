@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from . import (
     classify_agent, extract_agent, filter_agent, filter_builtin, filter_bulk, filter_phishing, filter_sender, filter_time,
-    template_post, webhook_agent,
+    http_post, template_post, webhook_agent,
 )
 from .base import StepDef
 
@@ -21,6 +21,7 @@ REGISTRY: dict[str, StepDef] = {
         extract_agent.STEP,
         webhook_agent.STEP,
         template_post.STEP,
+        http_post.STEP,
     )
 }
 

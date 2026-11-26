@@ -43,6 +43,7 @@ Copy `.env.example` to `.env` (it is git-ignored). Main keys:
 | `XMENDER_SECRET_KEY` | generated `data/secret.key` | encrypts stored credentials |
 | `XMENDER_POLL_INTERVAL_MINUTES` | `5` | automatic IMAP check interval |
 | `XMENDER_SECURE_COOKIES` | `false` | set `true` behind HTTPS |
+| `XMENDER_HTTP_ALLOW_PRIVATE` | `false` | let HTTP webhooks call loopback/LAN addresses |
 
 If you enable external access, put xMender behind a reverse proxy with HTTPS
 and turn on `XMENDER_SECURE_COOKIES`.

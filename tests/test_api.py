@@ -168,3 +168,42 @@ def test_poller_passes_sender_history(admin, monkeypatch):
     poller.poll_integration(gid)
     # invoice 7 from the same address (different case) came earlier
     assert len(seen[0]) == 1 and seen[0][0].tzinfo is not None
+
+
+def test_http_integration(admin, monkeypatch):
+    from xmender.services import http_hook
+
+    c = admin
+    r = c.post("/api/integrations/http", json={"name": "LAN", "url": "http://192.168.1.10/hook", "test": "skip"})
+    assert r.status_code == 400 and "private network" in r.text
+
+    monkeypatch.setattr(http_hook, "check_url", lambda url, allow_private: "93.184.215.14")
+    sent = []
+    monkeypatch.setattr(http_hook, "send", lambda target, **kw: sent.append((target, kw)) or 200)
+    r = c.post("/api/integrations/http", json={
+        "name": "ntfy", "url": "https://ntfy.example/topic-s3cret", "method": "PUT", "test": "send",
+        "headers": [{"name": "Authorization", "value": "Bearer tok-s3cret"}]})
+    assert r.status_code == 200, r.text
+    w = r.json()["integration"]
+    assert w["method"] == "PUT" and w["headers"] == ["Authorization"] and sent[0][1]["method"] == "PUT"
+    # edit: blank URL and blank header value keep the stored ones
+    r = c.post("/api/integrations/http", json={"id": w["id"], "name": "ntfy2", "test": "skip",
+                                               "headers": [{"name": "authorization", "value": ""}, {"name": "X-Extra", "value": "1"}]})
+    assert r.status_code == 200, r.text
+    from xmender.db import session_scope
+    from xmender.models import Integration
+    from xmender.services.accounts import http_target
+
+    with session_scope() as db:
+        t = http_target(db.get(Integration, w["id"]))
+    assert t.url == "https://ntfy.example/topic-s3cret"
+    assert t.headers == {"authorization": "Bearer tok-s3cret", "X-Extra": "1"}
+    listing = c.get("/api/integrations").text
+    assert "s3cret" not in listing and "ntfy.example" in listing
+
+    gid = c.get("/api/integrations").json()["gmail"][0]["id"]
+    steps = [{"type": "http_post", "config": {"http_integration_id": w["id"], "body": '{"s": "{{email.subject}}"}'}}]
+    r = c.post("/api/tasks", json={"name": "H", "gmail_integration_id": gid, "steps": steps})
+    assert r.status_code == 200, r.text
+    assert c.get("/api/tasks/meta").json()["http"] == [{"id": w["id"], "name": "ntfy2"}]
+    assert c.delete(f"/api/integrations/{w['id']}").status_code == 409

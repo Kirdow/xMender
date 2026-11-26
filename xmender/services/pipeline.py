@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import discord, gmail, llm
+from . import discord, gmail, http_hook, llm
 from .gmail import ParsedEmail
 from .steps import GROUP_LABELS, REGISTRY
 from .steps.base import (  # noqa: F401  (re-exported)
@@ -33,7 +33,10 @@ LIST_OPS = {"in", "not_in"}
 OPS = VALUE_OPS | {"is_set", "is_empty", "matched", "not_matched"}
 CONDITION_VALUE_LIMIT = 500
 
-_DOMAIN_ERRORS = (llm.LLMError, discord.DiscordError, gmail.GmailError, StepConfigError, StepError)
+_DOMAIN_ERRORS = (
+    llm.LLMError, discord.DiscordError, gmail.GmailError, http_hook.HttpHookError,
+    StepConfigError, StepError,
+)
 
 
 # --- validation --------------------------------------------------------------
@@ -83,7 +86,8 @@ def _validate_when(raw: Any, outputs: dict[str, set[str]]) -> dict[str, Any] | N
 
 
 def validate_steps(
-    steps: Any, *, discord_ids: set[int], model_ids: set[str] | None
+    steps: Any, *, discord_ids: set[int], model_ids: set[str] | None,
+    http_ids: set[int] | None = None,
 ) -> list[dict[str, Any]]:
     """Normalise a task's step list. `model_ids` is None when the provider's
     model list is unavailable; explicit models are then only checked at run
@@ -92,7 +96,7 @@ def validate_steps(
         raise StepConfigError("A task needs at least one step.")
     if len(steps) > MAX_STEPS:
         raise StepConfigError(f"A task can have at most {MAX_STEPS} steps.")
-    vctx = ValidateContext(discord_ids=discord_ids, model_ids=model_ids)
+    vctx = ValidateContext(discord_ids=discord_ids, model_ids=model_ids, http_ids=set(http_ids or ()))
     out: list[dict[str, Any]] = []
     for i, step in enumerate(steps, 1):
         try:

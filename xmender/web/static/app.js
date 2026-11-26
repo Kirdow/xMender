@@ -403,12 +403,22 @@ async function viewIntegrations(main) {
         h('button', { class: 'small', onclick: () => discordModal(d, reload) }, 'Edit'),
         h('button', { class: 'small danger', onclick: () => deleteIntegration(d.id, d.name, reload) }, 'Delete')))));
 
+  const httpCards = (data.http || []).map((w) => h('div', { class: 'card accent-pink' },
+    h('div', { class: 'card-head' },
+      h('div', {}, h('div', { class: 'card-title' }, w.name), h('div', { class: 'card-sub' }, `${w.method} ${w.url_hint}`)),
+      h('div', { class: 'btn-row' },
+        h('button', { class: 'small', onclick: () => httpModal(w, reload) }, 'Edit'),
+        h('button', { class: 'small danger', onclick: () => deleteIntegration(w.id, w.name, reload) }, 'Delete'))),
+    w.headers.length ? h('div', { class: 'chips' }, w.headers.map((n) => h('span', { class: 'chip' }, n))) : null));
+
   page(main, 'Integrations', 'Every integration is tested before it is saved.', null,
     h('h2', {}, h('span', { class: 'dot pink' }), 'LLM access'), anthCard,
     h('h2', {}, h('span', { class: 'dot' }), 'Gmail', h('button', { class: 'small', onclick: () => gmailModal(data.defaults, null, reload) }, '+ Add Gmail')),
     gmailCards.length ? gmailCards : h('div', { class: 'empty' }, 'No Gmail inbox connected.'),
     h('h2', {}, h('span', { class: 'dot lime' }), 'Discord webhooks', h('button', { class: 'small', onclick: () => discordModal(null, reload) }, '+ Add webhook')),
-    discordCards.length ? discordCards : h('div', { class: 'empty' }, 'No Discord webhook connected.'));
+    discordCards.length ? discordCards : h('div', { class: 'empty' }, 'No Discord webhook connected.'),
+    h('h2', {}, h('span', { class: 'dot pink' }), 'HTTP webhooks', h('button', { class: 'small', onclick: () => httpModal(null, reload) }, '+ Add HTTP webhook')),
+    httpCards.length ? httpCards : h('div', { class: 'empty' }, 'No HTTP webhook yet. Use one to send mail data to ntfy, Slack, Home Assistant or your own service.'));
 }
 
 async function deleteIntegration(id, name, reload) {
@@ -526,6 +536,58 @@ function discordModal(d, reload) {
     ]);
 }
 
+function httpModal(w, reload) {
+  const name = h('input', { type: 'text', value: w ? w.name : '', maxlength: 128, placeholder: 'e.g. ntfy phone' });
+  const url = h('input', { type: 'url', autocomplete: 'off', placeholder: w ? '(unchanged)' : 'https://ntfy.sh/my-topic' });
+  const method = choice([['POST', 'POST'], ['PUT', 'PUT']], w ? w.method : 'POST', () => {});
+  const headers = (w ? w.headers : []).map((n) => ({ name: n, value: '', stored: true }));
+  const rows = h('div', { class: 'field-rows' });
+  const draw = () => rows.replaceChildren(...headers.map((hd, i) => h('div', { class: 'header-row' },
+    h('input', { type: 'text', value: hd.name, placeholder: 'Authorization', 'aria-label': 'Header name', oninput: (e) => { hd.name = e.target.value; } }),
+    h('input', { type: 'password', autocomplete: 'off', value: hd.value, placeholder: hd.stored ? '(unchanged)' : 'Bearer …', 'aria-label': 'Header value',
+      oninput: (e) => { hd.value = e.target.value; } }),
+    h('button', { type: 'button', class: 'ghost small', title: 'Remove header', 'aria-label': 'Remove header', onclick: () => { headers.splice(i, 1); draw(); } }, '✕'))));
+  draw();
+  const err = h('p', { class: 'error-box hidden' });
+  modal(w ? 'Edit HTTP webhook' : 'Add HTTP webhook',
+    'Tasks can send JSON or text to this URL with the "HTTP webhook" step.',
+    h('div', {}, err,
+      field('Name', name, 'Label inside xMender.'),
+      h('div', { class: 'grid-url' }, field('URL', url, (w ? 'Leave empty to keep the stored one. ' : '') + 'Treated as a secret. Redirects are not followed. Addresses on this machine or the local network are blocked unless the server owner allows them.'), field('Method', method)),
+      field('Headers', h('div', {}, rows, h('button', { type: 'button', class: 'small', onclick: () => { headers.push({ name: '', value: '' }); draw(); } }, '+ Add header')),
+        'Optional, e.g. Authorization. Values are stored encrypted and never shown again; leave a stored value empty to keep it.')),
+    (close) => [
+      h('button', { onclick: close }, 'Cancel'),
+      h('button', { class: 'primary', onclick: () => {
+        err.classList.add('hidden');
+        httpTestChoice(async (mode) => {
+          try {
+            const r = await api('POST', '/api/integrations/http', {
+              id: w ? w.id : null, name: name.value, url: url.value || null, method: method.value, test: mode,
+              headers: headers.filter((x) => x.name.trim()).map((x) => ({ name: x.name, value: x.value })),
+            });
+            toast(r.tested ? 'Test request sent and webhook saved.' : 'Webhook saved without testing.', 'ok');
+            close(); reload();
+          } catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); }
+        });
+      } }, 'Save…'),
+    ]);
+}
+
+function httpTestChoice(done) {
+  modal('Send a test request?', null, h('div', {},
+    h('div', { class: 'callout' },
+      h('strong', {}, 'A real request will be sent. '),
+      'The test sends a small JSON body ', h('code', {}, '{"xmender": "test", "message": "…"}'),
+      ' to the URL. Any 2xx answer counts as working.'),
+    h('p', { class: 'small muted' }, 'Skipping still checks that the address is allowed, but not that the endpoint answers.')),
+  (close) => [
+    h('button', { onclick: close }, 'Cancel'),
+    h('button', { class: 'ternary', onclick: (e) => withBusy(e.currentTarget, async () => { await done('skip'); close(); }) }, 'Skip test & save'),
+    h('button', { class: 'primary', onclick: (e) => withBusy(e.currentTarget, async () => { await done('send'); close(); }) }, 'Send test & save'),
+  ]);
+}
+
 function discordTestChoice(done) {
   modal('Test the webhook?', null, h('div', {},
     h('div', { class: 'callout' },
@@ -603,11 +665,13 @@ const STEP_DEFAULTS = {
   classify_agent: () => ({ labels: [{ name: 'invoice', description: 'Bills and payment requests' }, { name: 'personal', description: 'Written by a real person to me' }], instructions: '', model: null }),
   extract_agent: () => ({ fields: [{ name: 'amount', type: 'number', description: 'Total amount to pay', required: false }], instructions: '', model: null }),
   webhook_agent: () => ({ instructions: '', model: null, discord_integration_id: null }),
+  http_post: () => ({ http_integration_id: null, mode: 'json',
+    body: '{\n  "subject": "{{email.subject}}",\n  "from": "{{email.from_addr}}",\n  "snippet": "{{email.snippet}}"\n}' }),
   template_post: () => ({ discord_integration_id: null, title: 'xMender: {{email.subject | clip:200}}',
     body: '**From:** {{email.from}}\n\n{{email.snippet}}', footer: '' }),
 };
 // Default step names on add; a number is appended when taken.
-const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_sender: 'sender', filter_phishing: 'phishing', filter_agent: 'ai_filter', webhook_agent: 'notify', template_post: 'post', extract_agent: 'extract', classify_agent: 'category' };
+const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_sender: 'sender', filter_phishing: 'phishing', filter_agent: 'ai_filter', webhook_agent: 'notify', template_post: 'post', extract_agent: 'extract', classify_agent: 'category', http_post: 'http' };
 // Output fields per type, mirroring the server. Filters also output `matched`.
 const STEP_OUTPUTS = {
   filter_bulk: () => ['signals'],
@@ -615,6 +679,7 @@ const STEP_OUTPUTS = {
   filter_sender: () => ['seen_count'],
   filter_phishing: () => ['signals', 'count'],
   classify_agent: () => ['label', 'reason'],
+  http_post: () => ['status'],
   extract_agent: (c) => (c.fields || []).map((f) => (f.name || '').trim().toLowerCase()).filter(Boolean),
 };
 const COND_OPS = [['equals', 'equals'], ['not_equals', 'does not equal'], ['contains', 'contains'],
@@ -846,6 +911,27 @@ const STEP_FORMS = {
         'Later steps use them as {{name.key}}. Missing values are empty; a missing required value fails the step.'),
       instructionsField(c, 'Optional. e.g. "Amounts are in SEK. The due date may be written as a weekday."', 'Optional extra guidance for the model.'),
       modelField(c, env),
+    ];
+  },
+  http_post(c, env) {
+    const hsel = h('select', {}, h('option', { value: '' }, env.meta.http.length ? 'Pick a webhook…' : 'No HTTP webhook set up'),
+      env.meta.http.map((x) => h('option', { value: x.id }, x.name)));
+    hsel.value = c.http_integration_id || '';
+    hsel.addEventListener('change', () => { c.http_integration_id = hsel.value ? Number(hsel.value) : null; });
+    const hint = h('div', { class: 'hint gap' });
+    const sync = () => {
+      hint.textContent = c.mode === 'text'
+        ? 'Sent as text/plain with placeholders filled in.'
+        : 'Must be valid JSON. Put placeholders inside quotes; they are escaped safely. A value that is only one placeholder, like "{{extract.amount}}", keeps its type (number, true/false, null).';
+    };
+    sync();
+    return [
+      h('div', { class: 'grid-2' },
+        field('HTTP webhook', hsel, env.meta.http.length ? null : 'Add one under Integrations first.'),
+        field('Body format', choice([['json', 'JSON'], ['text', 'Plain text']], c.mode || 'json', (v) => { c.mode = v; sync(); }))),
+      field('Body', templateInput(c, 'body', env, true)),
+      hint,
+      templateHelp(env),
     ];
   },
   template_post(c, env) {

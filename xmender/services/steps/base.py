@@ -39,6 +39,9 @@ class RunContext:
     # Arrival times (UTC, newest first) of earlier mail from the same sender
     # address in this inbox, excluding the current email. Capped.
     sender_seen: list[datetime] = field(default_factory=list)
+    # id -> (display name, target, method)
+    http: dict[int, tuple[str, Any, str]] = field(default_factory=dict)
+    http_allow_private: bool = False
 
 
 @dataclass
@@ -46,6 +49,7 @@ class ValidateContext:
     discord_ids: set[int]
     # None when the provider's model list is unavailable.
     model_ids: set[str] | None
+    http_ids: set[int] = field(default_factory=set)
     # Named earlier steps -> the fields they output.
     outputs: dict[str, set[str]] = field(default_factory=dict)
 

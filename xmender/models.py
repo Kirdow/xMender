@@ -37,7 +37,7 @@ def as_utc(dt: datetime | None) -> datetime | None:
 PERMISSIONS = ("integrations", "tasks")
 DEFAULT_PERMISSIONS = list(PERMISSIONS)
 
-INTEGRATION_KINDS = ("gmail", "discord", "anthropic")
+INTEGRATION_KINDS = ("gmail", "discord", "http", "anthropic")
 
 
 class User(Base):

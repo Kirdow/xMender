@@ -629,3 +629,98 @@ def test_classify_and_route(monkeypatch):
         with pytest.raises(pipeline.StepConfigError):
             _v([{"type": "classify_agent", "config": bad}])
     assert cl.output_schema([{"name": "x"}])["required"] == ["label", "reason"]
+
+
+# --- HTTP webhook ---
+
+def test_http_url_and_header_rules():
+    from xmender.services import http_hook as hh
+
+    assert hh.normalize_url(" https://ntfy.sh/topic?x=1#frag ") == "https://ntfy.sh/topic?x=1"
+    for bad in ("ftp://x.com", "https://user:pw@x.com/", "https://", "https://x.com:99999/"):
+        with pytest.raises(hh.HttpHookError):
+            hh.normalize_url(bad)
+    assert hh.normalize_headers([{"name": "Authorization", "value": "Bearer t"}, {"name": " ", "value": "x"}]) == {
+        "Authorization": "Bearer t"}
+    for bad in ([{"name": "Host", "value": "x"}], [{"name": "Bad Name", "value": "x"}],
+                [{"name": "X-A", "value": "a\r\nInjected: 1"}]):
+        with pytest.raises(hh.HttpHookError):
+            hh.normalize_headers(bad)
+
+
+def test_http_blocks_private_addresses(monkeypatch):
+    import socket
+
+    from xmender.services import http_hook as hh
+
+    for host in ("127.0.0.1", "10.1.2.3", "192.168.1.5", "169.254.169.254", "::1", "::ffff:127.0.0.1"):
+        with pytest.raises(hh.HttpHookError, match="private network"):
+            hh.resolve(host, 443, allow_private=False)
+    assert hh.resolve("192.168.1.5", 80, allow_private=True) == "192.168.1.5"
+    with pytest.raises(hh.HttpHookError):
+        hh.resolve("0.0.0.0", 80, allow_private=True)
+
+    # a name with one public and one private address is refused
+    monkeypatch.setattr(socket, "getaddrinfo", lambda host, port, **kw: [
+        (2, 1, 6, "", ("93.184.215.14", port)), (2, 1, 6, "", ("10.0.0.1", port))])
+    with pytest.raises(hh.HttpHookError, match="private network"):
+        hh.resolve("rebind.example", 443, allow_private=False)
+    assert hh._pinned("https://h.example:8443/p?q=1", "2001:db8::1") == "https://[2001:db8::1]:8443/p?q=1"
+
+
+def test_http_send_pins_address_and_reports(monkeypatch):
+    import httpx
+    import socket
+
+    from xmender.services import http_hook as hh
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda host, port, **kw: [(2, 1, 6, "", ("93.184.215.14", port))])
+    seen = []
+    status = {"code": 204}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(status["code"], headers={"location": "https://elsewhere/"})
+
+    real = httpx.Client
+    monkeypatch.setattr(hh.httpx, "Client", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    target = hh.Target("https://hooks.example.com/in?k=1", {"Authorization": "Bearer s3cret"})
+    assert hh.send(target, method="PUT", content_type="json", body={"a": "ü"}, allow_private=False) == 204
+    r = seen[0]
+    assert r.method == "PUT" and r.url.host == "93.184.215.14" and r.headers["host"] == "hooks.example.com"
+    assert r.extensions["sni_hostname"] == "hooks.example.com" and r.headers["authorization"] == "Bearer s3cret"
+    assert r.content == '{"a": "ü"}'.encode()
+
+    status["code"] = 302
+    with pytest.raises(hh.HttpHookError, match="redirect") as e:
+        hh.send(target, method="POST", content_type="text", body="x", allow_private=False)
+    status["code"] = 500
+    with pytest.raises(hh.HttpHookError, match="HTTP 500") as e:
+        hh.send(target, method="POST", content_type="text", body="x", allow_private=False)
+    # errors name the host only, never the URL or secrets
+    assert "k=1" not in str(e.value) and "s3cret" not in str(e.value)
+
+
+def test_http_post_step(monkeypatch):
+    from xmender.services import http_hook as hh
+
+    sent = []
+    monkeypatch.setattr(hh, "send", lambda target, **kw: sent.append(kw) or 200)
+    monkeypatch.setattr(llm, "complete", lambda *a, **kw: llm.LLMResult('{"amount": 12.5, "paid": false}', "end_turn", "m"))
+    body = '{"text": "{{email.subject | upper}} <{{email.from_addr}}>", "amount": "{{ex.amount}}", "paid": "{{ex.paid}}", "n": [1, "{{ex.zz}}"]}'
+    steps = pipeline.validate_steps([
+        {"type": "extract_agent", "name": "ex", "config": {"fields": [{"name": "amount", "type": "number"}, {"name": "paid", "type": "boolean"}, {"name": "zz"}]}},
+        {"type": "http_post", "name": "h", "config": {"http_integration_id": 3, "body": body}},
+    ], discord_ids=set(), model_ids=None, http_ids={3})
+    ctx = pipeline.RunContext("k", "m", http={3: ("Hook", hh.Target("https://x.example/"), "POST")})
+    evil = make_mail(subject='quote " and \\ backslash')
+    res = pipeline.run_task(steps, evil, ctx)
+    assert res.status == "completed" and res.vars["h"] == {"status": 200}
+    assert sent[0]["body"] == {"text": 'QUOTE " AND \\ BACKSLASH <billing@shop.com>', "amount": 12.5,
+                               "paid": False, "n": [1, None]}
+    assert sent[0]["content_type"] == "json" and sent[0]["method"] == "POST"
+
+    for cfg in ({"http_integration_id": 9, "body": "{}"}, {"http_integration_id": 3, "body": '{"a": {{email.subject}}}'},
+                {"http_integration_id": 3, "body": '{"a": "{{nope.x}}"}'}):
+        with pytest.raises(pipeline.StepConfigError):
+            pipeline.validate_steps([{"type": "http_post", "config": cfg}], discord_ids=set(), model_ids=None, http_ids={3})

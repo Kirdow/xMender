@@ -75,15 +75,15 @@ deploy/           systemd unit template; scripts/install-service.sh fills @USER@
 
 ### Integrations
 All live in the `Integration` table, keyed by `kind` (`gmail` | `discord` |
-`anthropic`):
+`http` | `anthropic`):
 - `config` (JSON): non-secret settings.
 - `secret`: Fernet ciphertext.
 - `state` (JSON): runtime data. For Gmail this is the IMAP cursor
   `uidvalidity`/`last_uid`, `last_polled_at`, `last_error` and `pending`.
 
 Rules:
-- Each user has at most one `anthropic` row; `gmail` and `discord` can have
-  several.
+- Each user has at most one `anthropic` row; `gmail`, `discord` and `http`
+  can have several.
 - Every save runs a live check first. Gmail does an IMAP login, plus SMTP if
   sending is on; nothing is sent. Anthropic lists models, which costs nothing.
   Discord posts a real test message, so the user must choose
@@ -95,7 +95,16 @@ Rules:
   feature sends email yet.
 - Secrets never leave the API: responses carry hints only (`key_hint`,
   `url_hint`). On edit, a blank secret field means "keep the stored one".
-- An integration referenced by a task cannot be deleted (409).
+- An integration referenced by a task cannot be deleted (409); steps report
+  their references through `StepDef.refs`.
+- HTTP webhooks (`services/http_hook.py`): the secret is JSON
+  `{"url", "headers"}`; `config.method` is POST or PUT. Save offers
+  `test: "send" | "skip"`; skip still checks the address. Every address the
+  host resolves to must be public unless `XMENDER_HTTP_ALLOW_PRIVATE`
+  (loopback, RFC 1918, link-local and 100.64/10 count as private). Requests
+  connect to the checked IP with `Host` and TLS `sni_hostname` set to the real
+  host, so DNS rebinding cannot reach internal addresses. No redirects.
+  Errors and logs name only the host, never the URL or header values.
 
 ### Mail processing (`services/poller.py`)
 - `Poller._loop` polls every Gmail integration every
@@ -138,6 +147,7 @@ blocks deleting them).
 | `template_post` | action | Discord embed from `title`/`body`/`footer` templates (`services/template.py`); no LLM |
 | `classify_agent` | agent | picks one of the user's categories (enum via structured outputs) or `other`; unknown answers become `other`; outputs `label`, `reason` |
 | `extract_agent` | agent | user-defined fields (`string`/`number`/`integer`/`boolean`/`date`) as JSON; structured outputs when supported, always coerced/validated in code; missing required field = error; outputs the field names |
+| `http_post` | action | JSON (placeholders only inside strings; a lone `"{{x.y}}"` keeps its type) or text body to an HTTP integration; outputs `status` |
 | `webhook_agent` | action | LLM writes the text; posted as an embed titled `xMender Notification`, colour `0x00FFFF` |
 
 The engine (`pipeline.py`) owns the options every step shares. They are stored

@@ -8,6 +8,7 @@ therefore be skipped explicitly.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,11 +16,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
 from ..db import get_db
 from ..models import Integration, Task, User
 from ..security import decrypt, encrypt
-from ..services import discord, gmail, llm, pipeline
-from ..services.accounts import gmail_account
+from ..services import discord, gmail, http_hook, llm, pipeline
+from ..services.accounts import gmail_account, http_target
 from .deps import require
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
@@ -60,6 +62,21 @@ def _discord_dict(i: Integration) -> dict[str, Any]:
     return {"id": i.id, "name": i.name, "url_hint": hint}
 
 
+def _http_dict(i: Integration) -> dict[str, Any]:
+    try:
+        t = http_target(i)
+        hint, header_names = f"{t.host}/…", sorted(t.headers)
+    except Exception:
+        hint, header_names = "(unreadable)", []
+    return {
+        "id": i.id,
+        "name": i.name,
+        "url_hint": hint,
+        "method": i.config.get("method", "POST"),
+        "headers": header_names,
+    }
+
+
 def _anthropic_dict(i: Integration) -> dict[str, Any]:
     return {"id": i.id, "key_hint": i.config.get("key_hint", "")}
 
@@ -80,6 +97,7 @@ def list_integrations(db: Session = Depends(get_db), user: User = Depends(requir
     return {
         "gmail": [_gmail_dict(r) for r in rows if r.kind == "gmail"],
         "discord": [_discord_dict(r) for r in rows if r.kind == "discord"],
+        "http": [_http_dict(r) for r in rows if r.kind == "http"],
         "anthropic": _anthropic_dict(anth) if anth else None,
         "defaults": {
             "imap_host": gmail.IMAP_HOST,
@@ -251,6 +269,84 @@ async def save_discord(body: DiscordBody, db: Session = Depends(get_db), user: U
         integ.secret = encrypt(url)
     db.flush()
     return {"integration": _discord_dict(integ), "tested": body.test == "send"}
+
+
+# --- HTTP webhook ------------------------------------------------------------
+
+HTTP_TEST_BODY = {
+    "xmender": "test",
+    "message": "This is a test request from xMender. If it arrived, the webhook works.",
+}
+
+
+class HeaderItem(BaseModel):
+    name: str = Field(max_length=64)
+    value: str = Field("", max_length=4000)  # blank on edit keeps the stored value
+
+
+class HttpBody(BaseModel):
+    id: int | None = None
+    name: str = Field(min_length=1, max_length=128)
+    url: str | None = None  # blank on edit keeps the stored one
+    method: Literal["POST", "PUT"] = "POST"
+    headers: list[HeaderItem] | None = None  # None on edit keeps the stored ones
+    test: Literal["send", "skip"]
+
+
+@router.post("/http")
+async def save_http(body: HttpBody, db: Session = Depends(get_db), user: User = Depends(require("integrations"))):
+    existing = _owned(db, user, body.id, "http") if body.id else None
+    old = http_target(existing) if existing is not None else None
+    try:
+        if body.url and body.url.strip():
+            url = http_hook.normalize_url(body.url)
+        elif old is not None:
+            url = old.url
+        else:
+            raise HTTPException(400, "URL is required.")
+        if body.headers is None:
+            headers = dict(old.headers) if old else {}
+        else:
+            items = []
+            for h in body.headers:
+                value = h.value
+                if not value and old is not None:
+                    value = next((v for k, v in old.headers.items() if k.lower() == h.name.strip().lower()), "")
+                items.append({"name": h.name, "value": value})
+            headers = http_hook.normalize_headers(items)
+    except http_hook.HttpHookError as e:
+        raise HTTPException(400, str(e)) from e
+
+    target = http_hook.Target(url=url, headers=headers)
+    allow_private = get_settings().http_allow_private
+    if body.test == "send":
+        try:
+            await asyncio.to_thread(
+                http_hook.send, target, method=body.method, content_type="json",
+                body=HTTP_TEST_BODY, allow_private=allow_private,
+            )
+        except http_hook.HttpHookError as e:
+            raise HTTPException(400, str(e)) from e
+    else:
+        # Still refuse blocked hosts up front.
+        try:
+            await asyncio.to_thread(http_hook.check_url, url, allow_private)
+        except http_hook.HttpHookError as e:
+            raise HTTPException(400, str(e)) from e
+
+    secret = encrypt(json.dumps({"url": url, "headers": headers}))
+    name = body.name.strip()
+    if existing is None:
+        integ = Integration(user_id=user.id, kind="http", name=name, config={"method": body.method},
+                            secret=secret, state={})
+        db.add(integ)
+    else:
+        integ = existing
+        integ.name = name
+        integ.config = {**integ.config, "method": body.method}
+        integ.secret = secret
+    db.flush()
+    return {"integration": _http_dict(integ), "tested": body.test == "send"}
 
 
 # --- Anthropic ---------------------------------------------------------------
