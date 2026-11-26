@@ -5,6 +5,13 @@ automation service. Today it watches Gmail inboxes over IMAP, runs each new
 email through user-defined **tasks** (filters + LLM agent steps), and posts
 results to Discord webhooks. Users reach it through a browser UI.
 
+**User docs are part of every change.** The end-user docs in
+`xmender/web/static/docs/` (in-app Docs modal and public `/docs` page) must
+stay accurate. Any change that alters user-visible behaviour, labels, limits,
+defaults or error text updates the affected docs in the same commit. Load the
+`docs-maintenance` skill (`.claude/skills/docs-maintenance/SKILL.md`) before
+such a change; `tests/test_docs.py` catches part of the drift.
+
 ## Commands
 
 ```bash
@@ -43,6 +50,7 @@ xmender/
   api/            one router per area: auth, users (admin), integrations, tasks, dashboard
   services/       blocking domain logic: gmail, discord, llm, pricing, usage, prompts, filters, pipeline, accounts, poller
   web/static/     index.html, app.js, style.css, fonts, icon.svg (no build step)
+                  docs.js + docs.html + docs/*.md: user docs (modal and /docs)
 migrations/       Alembic (render_as_batch=True so ALTERs work on SQLite)
 deploy/           systemd unit template; scripts/install-service.sh fills @USER@/@GROUP@/@DIR@
 ```
@@ -220,6 +228,8 @@ To add a step type:
   `steps.base.call_llm`, which records usage).
 - in `app.js`: `STEP_DEFAULTS`, `STEP_FORMS`, `STEP_NAME_BASE`, and
   `STEP_OUTPUTS` if it has outputs. Colours follow the group automatically.
+- in `docs/steps.md`: a `### <label> {#<type>}` section (settings, outputs)
+  and a row in the summary table. The editor's `?` button opens it.
 
 Each step appends a log entry to `TaskRun.log` with these fields: `step`,
 `type`, `label`, optionally `name`, `outcome` (`pass` | `no-match` | `stop` |
@@ -337,6 +347,11 @@ Each step appends a log entry to `TaskRun.log` with these fields: `step`,
 ### Frontend (`xmender/web/static/`)
 - Vanilla JS in a single `app.js` with hash routing (`ROUTES`). There is no
   framework and no bundler.
+- Docs: `docs.js` (`XDocs.mount`) renders `static/docs/*.md` for both the
+  modal (`openDocs(addr)` in app.js) and the standalone `/docs` page
+  (`docs.html`, public, served by `app.py`). Link to a doc spot with
+  `openDocs('section/heading-id')` or `docsLink(addr, text)`. Never put doc
+  text in app.js; edit the `.md` files.
 - Build DOM only with `h(tag, attrs, ...children)`, which uses
   `textContent`. Never use `innerHTML` with server data.
 - CSP is `script-src 'self'; style-src 'self'`. That means no inline
