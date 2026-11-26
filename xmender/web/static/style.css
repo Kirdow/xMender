@@ -67,13 +67,14 @@ a:hover { color: color-mix(in srgb, var(--primary) 70%, white); }
 label { display: block; font-size: 0.8rem; margin: 0 0 0.3rem; color: var(--muted); }
 .field { margin-bottom: 0.9rem; }
 .hint { font-size: 0.72rem; color: var(--muted); margin-top: 0.3rem; }
-input[type=text], input[type=password], input[type=email], input[type=url], input[type=number], select, textarea {
+input[type=text], input[type=password], input[type=email], input[type=url], input[type=number], input[type=time], select, textarea {
   width: 100%; padding: 0.55rem 0.75rem;
   background: var(--bg); color: var(--fg);
   border: 1px solid var(--border); border-radius: 6px;
   font: inherit; font-size: 0.9rem;
 }
 textarea { min-height: 110px; resize: vertical; }
+input[type=time] { color-scheme: dark; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent); }
 select option { background: var(--panel); }
 .input-row { display: flex; gap: 6px; }
@@ -240,6 +241,7 @@ pre.response {
 .check-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
 .day-chips { margin-top: 2px; }
 .day-chips .chip { font-size: 0.78rem; padding: 4px 12px; }
+textarea.short { min-height: 70px; }
 .when-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .when-row select, .when-row input { width: auto; flex: 1 1 140px; }
 .step-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 8px; }

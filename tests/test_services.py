@@ -430,3 +430,45 @@ def test_sender_history_filter():
     for bad in ({"mode": "x"}, {"mode": "frequent", "count": 0}, {"mode": "frequent", "count": 1, "days": "a"}):
         with pytest.raises(pipeline.StepConfigError):
             _v([{"type": "filter_sender", "config": bad}])
+
+
+def test_phishing_signals():
+    from xmender.services import signals
+
+    genuine = "mx.google.com; dkim=pass header.i=@shop.com; spf=pass; dmarc=pass (p=REJECT)"
+    failed = "mx.google.com; dkim=fail header.i=@x.com; spf=softfail; dmarc=fail"
+    forged = "mx.google.com; dkim=pass; spf=pass; dmarc=pass"
+    # Gmail's real header comes first; a forged one further down is ignored
+    m = make_mail(headers={"authentication-results": [failed, forged]})
+    assert signals.phishing_signals(m) == ["auth_fail"]
+    assert signals.phishing_signals(make_mail(headers={"authentication-results": [genuine]})) == []
+    # another server's verdict is never trusted
+    other = make_mail(headers={"authentication-results": ["evil.example; spf=fail"]})
+    assert signals.auth_results(other) is None
+
+    rt = make_mail(headers={"reply-to": ["Pay <collect@evil.io>"]})
+    assert signals.phishing_signals(rt) == ["reply_to_mismatch"]
+    same_org = make_mail(sender="Shop <a@mail.shop.co.uk>", headers={"reply-to": ["b@shop.co.uk"]})
+    assert signals.phishing_signals(same_org) == []
+    assert signals.phishing_signals(make_mail(sender='"support@paypal.com" <x@evil.io>')) == ["name_has_address"]
+
+    brands = signals.parse_brands("PayPal = paypal.com\n\nMy Bank = mybank.se, mybank.com")
+    assert brands[1] == {"name": "My Bank", "domains": ["mybank.se", "mybank.com"]}
+    fake = make_mail(sender="PayPal Support <help@gmail.com>")
+    assert signals.phishing_signals(fake, brands) == ["brand_mismatch", "free_mail"]
+    real = make_mail(sender="PayPal <service@mail.paypal.com>")
+    assert signals.phishing_signals(real, brands) == []
+    with pytest.raises(ValueError):
+        signals.parse_brands("PayPal")
+
+    steps = _v([{"type": "filter_phishing", "name": "p",
+                 "config": {"kinds": ["brand_mismatch", "free_mail"], "min_signals": 2,
+                            "brands": "PayPal = paypal.com"}}])
+    res = pipeline.run_task(steps, fake, pipeline.RunContext(None, None))
+    assert res.status == "completed" and res.vars["p"]["count"] == 2
+    res = pipeline.run_task(steps, make_mail(sender="Bob <bob@gmail.com>"), pipeline.RunContext(None, None))
+    assert res.status == "stopped" and "needs 2" in res.log[0]["detail"]
+    for bad in ({"kinds": []}, {"kinds": ["free_mail"], "min_signals": 2},
+                {"kinds": ["brand_mismatch"]}, {"kinds": ["free_mail"], "brands": "x ="}):
+        with pytest.raises(pipeline.StepConfigError):
+            _v([{"type": "filter_phishing", "config": bad}])

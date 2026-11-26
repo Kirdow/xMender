@@ -598,16 +598,18 @@ const STEP_DEFAULTS = {
   filter_bulk: () => ({ kinds: ['newsletter', 'bulk', 'noreply'] }),
   filter_time: () => ({ days: [0, 1, 2, 3, 4], start: '09:00', end: '17:00', timezone: '' }),
   filter_sender: () => ({ mode: 'first_time', count: 3, days: 7 }),
+  filter_phishing: () => ({ kinds: ['auth_fail', 'reply_to_mismatch', 'name_has_address'], min_signals: 1, brands: '' }),
   filter_agent: () => ({ instructions: '', model: null }),
   webhook_agent: () => ({ instructions: '', model: null, discord_integration_id: null }),
 };
 // Default step names on add; a number is appended when taken.
-const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_sender: 'sender', filter_agent: 'ai_filter', webhook_agent: 'notify' };
+const STEP_NAME_BASE = { filter_builtin: 'filter', filter_bulk: 'bulk', filter_time: 'hours', filter_sender: 'sender', filter_phishing: 'phishing', filter_agent: 'ai_filter', webhook_agent: 'notify' };
 // Output fields per type, mirroring the server. Filters also output `matched`.
 const STEP_OUTPUTS = {
   filter_bulk: () => ['signals'],
   filter_time: () => ['local_time'],
   filter_sender: () => ['seen_count'],
+  filter_phishing: () => ['signals', 'count'],
 };
 const COND_OPS = [['equals', 'equals'], ['not_equals', 'does not equal'], ['contains', 'contains'],
   ['in', 'is one of'], ['not_in', 'is not one of'], ['is_set', 'is set'], ['is_empty', 'is empty']];
@@ -739,6 +741,19 @@ const STEP_FORMS = {
       field('Match when', mode),
       freq,
       h('div', { class: 'hint' }, 'Compares the From address with mail xMender has already processed for this inbox, so history starts when the inbox was connected. Invert "writes often" to rate-limit a noisy sender.'),
+    ];
+  },
+  filter_phishing(c, env) {
+    const brands = bindIn(c, 'brands', h('textarea', { class: 'short', placeholder: 'PayPal = paypal.com\nMy Bank = mybank.se, mybank.com' }));
+    brands.value = c.brands || '';
+    return [
+      field('Warning signs', checkList(env.meta.phishing_kinds, c, 'kinds')),
+      h('div', { class: 'grid-2' },
+        field('Signs needed', bindIn(c, 'min_signals', h('input', { type: 'number', min: 1, max: 5, value: c.min_signals ?? 1 }), Number),
+          'How many of the checked signs must be present to match.'),
+        h('div', {})),
+      field('Protected names', brands, 'One per line: a name scammers imitate, and the domains it really sends from. Used by the "protected name" sign; checks the sender name and subject.'),
+      h('div', { class: 'hint' }, 'Authentication results come only from Gmail\'s own header, which senders cannot fake. Free email alone is common for real people, so combine it with other signs.'),
     ];
   },
   filter_agent(c, env) {

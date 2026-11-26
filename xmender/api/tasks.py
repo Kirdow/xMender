@@ -54,6 +54,7 @@ def meta(db: Session = Depends(get_db), user: User = Depends(require("tasks"))):
         "has_anthropic": anthropic_key(db, user.id) is not None,
         "default_model": user.default_model,
         "bulk_kinds": [{"key": k, "label": v} for k, v in signals.BULK_KINDS.items()],
+        "phishing_kinds": [{"key": k, "label": v} for k, v in signals.PHISHING_KINDS.items()],
     }
 
 
