@@ -120,7 +120,7 @@ def _process_message(
                     .limit(SENDER_HISTORY_LIMIT)
                 )
             ]
-        jobs = chains.order(n for n in nodes.values() if n.enabled)
+        jobs = chains.order(n for n in nodes.values() if n.enabled and not n.broken)
 
     # LLM and webhook calls happen outside any DB transaction.
     done: dict[int, pipeline.RunResult] = {}
@@ -156,6 +156,8 @@ def _run_job(
     why = f"“{parent.name}” {chains.STATUS_LABELS.get(got, got)}"
     if prev is None and not parent.enabled:
         why += " (paused)"
+    elif prev is None and parent.broken:
+        why += " (needs fixing)"
     entry: dict[str, Any] = {"step": 0, "type": "chain", "label": f"After {parent.name}"}
     if got not in job.statuses:
         entry.update(outcome="skip", detail=f"{why}; runs only if it {chains.describe(job.statuses)}")

@@ -273,10 +273,22 @@ def test_task_chains(admin, monkeypatch):
     assert "at least one" in c.post("/api/tasks", json={**body, "depends_on": {"task_id": a["id"], "status": []}}).text
     r = c.put(f"/api/tasks/{a['id']}", json={**a, "depends_on": {"task_id": b["id"]}})
     assert r.status_code == 400 and "loop" in r.text
-    # editing A must not break B (it uses `inv`), nor move it to another inbox
+    # renaming `inv` in A rewrites B's placeholder
+    task = lambda tid: next(t for t in c.get("/api/tasks").json()["tasks"] if t["id"] == tid)
+    renamed = [{**a["steps"][0], "name": "invoice"}, a["steps"][1]]
+    r = c.put(f"/api/tasks/{a['id']}", json={**a, "steps": renamed, "renames": {"inv": "invoice"}})
+    assert r.status_code == 200, r.text
+    assert r.json()["chain"] == {"updated": ["B"], "paused": [], "fixed": []}
+    assert task(b["id"])["steps"][0]["config"]["body"] == "B {{invoice.matched}}"
+    r = c.put(f"/api/tasks/{a['id']}", json={**a, "renames": {"invoice": "inv"}})
+    assert r.status_code == 200 and task(b["id"])["steps"][0]["config"]["body"] == "B {{inv.matched}}"
+    # dropping `inv` breaks B: refused unless forced, then B is paused until fixed
     r = c.put(f"/api/tasks/{a['id']}", json={**a, "steps": [post("A")]})
-    assert r.status_code == 400 and "“B”" in r.text
-    assert "same inbox" in c.put(f"/api/tasks/{a['id']}", json={**a, "gmail_integration_id": first}).text
+    assert r.status_code == 409 and r.json()["detail"]["broken"][0]["name"] == "B"
+    r = c.put(f"/api/tasks/{a['id']}", json={**a, "steps": [post("A")], "force": True})
+    assert r.json()["chain"]["paused"] == ["B"] and "`inv`" in task(b["id"])["broken"]
+    r = c.put(f"/api/tasks/{a['id']}", json=a)
+    assert r.json()["chain"]["fixed"] == ["B"] and task(b["id"])["broken"] is None
     assert c.delete(f"/api/tasks/{a['id']}").status_code == 409
 
     sent = []
@@ -313,3 +325,8 @@ def test_task_chains(admin, monkeypatch):
     assert poller.poll_integration(gid)["runs"] == 2
     runs = {r["task_name"]: r for r in c.get("/api/emails?limit=1").json()["emails"][0]["runs"]}
     assert not sent and "(paused)" in runs["B"]["log"][0]["detail"]
+
+    # moving A to another inbox moves its chained tasks along
+    r = c.put(f"/api/tasks/{a['id']}", json={**a, "enabled": True, "gmail_integration_id": first})
+    assert r.status_code == 200 and sorted(r.json()["chain"]["updated"]) == ["B", "C"]
+    assert task(cc["id"])["gmail_integration_id"] == first

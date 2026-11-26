@@ -129,7 +129,10 @@ errors, stopped by a filter, failed, or did not run). A chained task can use
 the named steps of the tasks before it, so one task can classify and two
 others act on "completed" and "stopped" as an if/else. Use **+ Then** on a
 task to start one chained after it. A task with chained tasks cannot be
-deleted, and edits that would break them are refused.
+deleted. Renaming a step or changing the inbox updates the chained tasks
+automatically; if an edit would still break one (for example a removed step
+it uses), xMender asks first and can save anyway, pausing the broken tasks
+("needs fixing") until they are fixed and saved again.
 
 Agent steps use the step's model or your default model (Settings) and can
 optionally read the email's PDF and image attachments. Prompts wrap the email

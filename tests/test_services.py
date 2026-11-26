@@ -907,3 +907,14 @@ def test_chain_order_and_inheritance():
         chains.validate({"task_id": 1}, 3, 9, nodes)  # 3 -> 1 -> 3
     assert chains.validate({"task_id": 3, "status": ["error", "completed"]}, None, 9, nodes) == (
         3, ["completed", "error"])
+
+
+def test_chain_renames_swap():
+    from xmender.services import chains
+
+    steps = [{"type": "template_post", "when": {"step": "a", "op": "matched"},
+              "config": {"body": "{{a.x}} {{ b.y }} {{email.subject}}", "list": ["{{a.z}}"]}}]
+    out = chains.apply_renames(steps, chains.rename_map({"a": "b", "b": "a", "bad name": "x"}))
+    assert out[0]["when"]["step"] == "b"
+    assert out[0]["config"] == {"body": "{{b.x}} {{ a.y }} {{email.subject}}", "list": ["{{b.z}}"]}
+    assert steps[0]["when"]["step"] == "a"  # input untouched

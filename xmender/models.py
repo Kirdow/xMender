@@ -120,6 +120,9 @@ class Task(Base):
         ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
     )
     depends_on_status: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    # Set when an earlier task in the chain changed in a way that breaks this
+    # one; the poller skips it until a save makes it valid again.
+    broken: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

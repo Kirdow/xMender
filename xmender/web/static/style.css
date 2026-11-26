@@ -349,3 +349,4 @@ button.reveal:hover, button.reveal.active { color: var(--primary); }
 }
 .chain-line { margin-top: 4px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .chain-line .chip-name { color: var(--primary); }
+.broken-list { margin: 8px 0; padding-left: 18px; color: var(--danger); overflow-wrap: anywhere; }

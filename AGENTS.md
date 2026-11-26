@@ -190,9 +190,17 @@ not met; no step ran).
   `depends_on: {task_id, status: [...]} | null`. `skipped` = the parent did
   not run (paused, or its own chain condition failed).
 - Parent must use the same inbox; loops and chains over `MAX_DEPTH` are
-  refused. Deleting a parent is 409. Saving a parent revalidates every
-  descendant (`_check_dependents` in `api/tasks.py`), so a rename or inbox
-  change that would break one is a 400.
+  refused. Deleting a parent is 409.
+- Saving a task plans every descendant (`_plan_dependents` in
+  `api/tasks.py`): the editor sends `renames: {old: new}` (names as loaded vs
+  now), `chains.apply_renames` rewrites `when.step` and `{{old.`
+  placeholders (any nested string in `config`), and the inbox moves along.
+  Descendants that still fail validation give a 409 with
+  `detail: {message, broken: [{id, name, error}]}` unless `force: true`;
+  then they get `Task.broken` (the error) and the poller skips them. Already
+  broken ones do not trigger the 409. Any later save that validates a task
+  (its own, or its parent's) clears `broken`. PUT returns
+  `chain: {updated, paused, fixed}` (task names).
 - A chained task inherits its ancestors' named step outputs:
   `validate_steps(inherited=...)` at save, `run_task(inherited=parent.vars)`
   at run time. Own step names may not reuse inherited ones.

@@ -88,8 +88,13 @@ async function api(method, path, body) {
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith('/api/auth/')) { boot(); }
     let msg = data && data.detail;
+    let extra = null;
     if (Array.isArray(msg)) msg = msg.map((d) => d.msg).join('; ');
-    throw new Error(msg || `Request failed (${res.status}).`);
+    else if (msg && typeof msg === 'object') { extra = msg; msg = msg.message; }
+    const err = new Error(msg || `Request failed (${res.status}).`);
+    err.status = res.status;
+    err.data = extra;
+    throw err;
   }
   return data;
 }
@@ -700,6 +705,7 @@ async function viewTasks(main, rest) {
             ' ' + listOr(t.depends_on.status.map((k) => statusLabel[k] || k)),
             byId[t.depends_on.task_id].enabled ? null : h('span', { class: 'chip pink' }, 'paused')) : null),
         h('div', { class: 'btn-row' },
+          t.broken ? h('span', { class: 'chip red', title: t.broken }, 'needs fixing') : null,
           switchEl(t.enabled, async (on, input) => {
             input.disabled = true;
             try { await api('PUT', `/api/tasks/${t.id}`, { ...t, enabled: on }); t.enabled = on; toast(on ? 'Task enabled.' : 'Task paused.', 'ok'); }
@@ -713,6 +719,7 @@ async function viewTasks(main, rest) {
             if (!(await confirmDialog('Delete task', `Delete "${t.name}"? Past activity stays visible.`, 'Delete', true))) return;
             try { await api('DELETE', `/api/tasks/${t.id}`); toast('Task deleted.', 'ok'); viewTasks(main, []); } catch (e) { toast(e.message, 'err'); }
           } }, 'Delete'))),
+      t.broken ? h('div', { class: 'error-box mt mb0' }, 'Paused until fixed: ', t.broken) : null,
       h('div', { class: 'chips' }, t.steps.map((s, i) => h('span', { class: 'chip ' + (GROUP_CHIP[group[s.type]] || '') }, `${i + 1}. ${label[s.type] || s.type}`)))))
       : h('div', { class: 'empty' }, 'No tasks yet.'));
 }
@@ -1215,6 +1222,8 @@ async function viewTaskEditor(main, id) {
     gmail_integration_id: after ? after.gmail_integration_id : meta.gmail[0] && meta.gmail[0].id,
     depends_on: after ? { task_id: after.id, status: ['completed'] } : null,
   };
+  // Step names as loaded, so a save can tell chained tasks about renames.
+  const origName = new WeakMap(task.steps.filter((s) => s.name).map((s) => [s, s.name]));
   const label = Object.fromEntries(meta.step_types.map((s) => [s.type, s.label]));
   const env = {
     meta, models, task,
@@ -1300,10 +1309,29 @@ async function viewTaskEditor(main, id) {
     g.items.map((s) => h('option', { value: s.type }, s.label)))));
   const saveBtn = h('button', { class: 'primary', onclick: () => withBusy(saveBtn, async () => {
     err.classList.add('hidden');
-    const body = { name: name.value, gmail_integration_id: Number(inbox.value), enabled: enabled.checked, steps: task.steps, depends_on: task.depends_on };
+    const renames = {};
+    for (const s of task.steps) if (origName.has(s) && s.name && origName.get(s) !== s.name) renames[origName.get(s)] = s.name;
+    const body = { name: name.value, gmail_integration_id: Number(inbox.value), enabled: enabled.checked, steps: task.steps, depends_on: task.depends_on, renames };
     try {
-      if (id === 'new') await api('POST', '/api/tasks', body); else await api('PUT', `/api/tasks/${id}`, body);
-      toast('Task saved.', 'ok');
+      let r;
+      if (id === 'new') r = await api('POST', '/api/tasks', body);
+      else {
+        try { r = await api('PUT', `/api/tasks/${id}`, body); } catch (e) {
+          if (e.status !== 409 || !e.data || !e.data.broken) throw e;
+          const ok = await confirmDialog('Chained tasks would break',
+            h('div', {}, 'These tasks run after this one and would stop working:',
+              h('ul', { class: 'broken-list' }, e.data.broken.map((b) => h('li', {}, h('strong', {}, b.name), ': ', b.error))),
+              'Save anyway to pause them until they are fixed, or cancel and keep editing.'),
+            'Save and pause them', true);
+          if (!ok) return;
+          r = await api('PUT', `/api/tasks/${id}`, { ...body, force: true });
+        }
+      }
+      const ch = r.chain || {};
+      const notes = [ch.updated && ch.updated.length ? `updated ${ch.updated.join(', ')}` : null,
+        ch.paused && ch.paused.length ? `paused ${ch.paused.join(', ')}` : null,
+        ch.fixed && ch.fixed.length ? `resumed ${ch.fixed.join(', ')}` : null].filter(Boolean);
+      toast(notes.length ? `Task saved; ${notes.join('; ')}.` : 'Task saved.', ch.paused && ch.paused.length ? 'err' : 'ok');
       location.hash = '#/tasks';
     } catch (e) { err.textContent = e.message; err.classList.remove('hidden'); window.scrollTo(0, 0); main.scrollTop = 0; }
   }) }, 'Save task');
@@ -1311,6 +1339,7 @@ async function viewTaskEditor(main, id) {
   page(main, id === 'new' ? 'New task' : 'Edit task', null,
     [h('button', { onclick: () => { location.hash = '#/tasks'; } }, 'Cancel'), saveBtn],
     err,
+    task.broken ? h('div', { class: 'callout' }, 'This task is paused because an earlier task in its chain changed: ', task.broken, ' Fix it and save to resume.') : null,
     !meta.has_anthropic ? h('div', { class: 'callout' }, 'Agent steps need the Anthropic integration. ', can('integrations') ? h('a', { href: '#/integrations' }, 'Connect it') : null) : null,
     h('div', { class: 'card' },
       h('div', { class: 'grid-2' }, field('Name', name), field('Inbox', inbox)),

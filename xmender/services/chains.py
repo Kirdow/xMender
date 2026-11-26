@@ -7,10 +7,11 @@ parent's own ancestors), so its conditions and templates can use them.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from .pipeline import StepConfigError, step_outputs
+from .pipeline import NAME_RE, StepConfigError, step_outputs
 
 # Parent statuses a chain can wait for. `skipped` means the parent did not
 # run: it is paused, or its own chain condition was not met.
@@ -37,13 +38,15 @@ class Node:
     enabled: bool = True
     parent_id: int | None = None
     statuses: list[str] = field(default_factory=lambda: list(DEFAULT_STATUSES))
+    # Why the task is paused after an earlier task changed under it.
+    broken: str | None = None
 
 
 def node(task: Any) -> Node:
     return Node(
         id=task.id, name=task.name, inbox_id=task.gmail_integration_id, steps=list(task.steps or []),
         enabled=bool(task.enabled), parent_id=task.depends_on_id,
-        statuses=list(task.depends_on_status or DEFAULT_STATUSES),
+        statuses=list(task.depends_on_status or DEFAULT_STATUSES), broken=task.broken,
     )
 
 
@@ -133,3 +136,45 @@ def order(nodes: Iterable[Node]) -> list[Node]:
 def describe(statuses: list[str]) -> str:
     labels = [STATUS_LABELS.get(s, s) for s in statuses]
     return labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " or " + labels[-1]
+
+
+# --- renames -----------------------------------------------------------------
+
+_PLACEHOLDER_NS = re.compile(r"\{\{(\s*)([a-z][a-z0-9_]*)\.")
+
+
+def rename_map(raw: Any) -> dict[str, str]:
+    """Normalise the editor's {old step name: new step name} map."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for old, new in list(raw.items())[:200]:
+        old, new = str(old).strip().lower(), str(new or "").strip().lower()
+        if NAME_RE.match(old) and NAME_RE.match(new) and old != new:
+            out[old] = new
+    return out
+
+
+def _rename_value(v: Any, renames: dict[str, str]) -> Any:
+    if isinstance(v, str):
+        return _PLACEHOLDER_NS.sub(lambda m: "{{" + m.group(1) + renames.get(m.group(2), m.group(2)) + ".", v)
+    if isinstance(v, list):
+        return [_rename_value(x, renames) for x in v]
+    if isinstance(v, dict):
+        return {k: _rename_value(x, renames) for k, x in v.items()}
+    return v
+
+
+def apply_renames(steps: list[dict[str, Any]], renames: dict[str, str]) -> list[dict[str, Any]]:
+    """Point conditions and `{{name.` placeholders at renamed earlier steps.
+    All renames apply at once, so swapping two names works."""
+    if not renames:
+        return steps
+    out = []
+    for s in steps:
+        s = {**s, "config": _rename_value(s.get("config") or {}, renames)}
+        when = s.get("when")
+        if isinstance(when, dict) and when.get("step") in renames:
+            s["when"] = {**when, "step": renames[when["step"]]}
+        out.append(s)
+    return out
