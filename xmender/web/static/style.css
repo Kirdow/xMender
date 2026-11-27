@@ -53,7 +53,7 @@ a:hover { color: color-mix(in srgb, var(--primary) 70%, white); }
 }
 
 /* ── Auth screens ── */
-.auth-wrap { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 15vh 16px 32px; }
+.auth-wrap { display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 15vh 16px 32px; }
 .auth-card {
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 2rem; width: 380px; max-width: 100%;
@@ -144,7 +144,18 @@ button.block { width: 100%; padding: 0.7rem; font-size: 0.95rem; }
 .user-bar button svg { width: 16px; height: 16px; display: block; }
 
 .main { flex: 1; overflow-y: auto; min-width: 0; }
-.page { max-width: 980px; margin: 0 auto; padding: 28px 24px 60px; }
+.page { max-width: 980px; margin: 0 auto; padding: 28px 24px 24px; }
+
+/* Build footer (build.js): every page, the login card and /docs. */
+.build-footer {
+  margin-top: 48px; padding-top: 12px; border-top: 1px solid var(--faint);
+  text-align: center; font-size: 0.7rem; color: var(--muted); min-height: 1.5em;
+}
+.build-footer a.build-hash { color: var(--primary); text-decoration: none; }
+.build-footer a.build-hash:hover { text-decoration: underline; }
+.build-footer .build-dirty { color: var(--ternary); }
+.auth-wrap .build-footer { border-top: none; margin-top: 16px; }
+.docs-page > .build-footer { max-width: 1240px; margin: 0 auto; padding: 12px 24px 24px; }
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
 .page-head h1 { margin: 0; font-size: 1.3rem; font-weight: 600; }
 .page-head p { margin: 4px 0 0; color: var(--muted); font-size: 0.8rem; }

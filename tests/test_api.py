@@ -37,6 +37,17 @@ def test_pwa_assets(app_client):
             assert app_client.get(src).status_code == 200, src
 
 
+def test_version_is_public(app_client):
+    r = app_client.get("/api/version")
+    assert r.status_code == 200
+    b = r.json()
+    assert set(b) == {"version", "commit", "date", "dirty", "url"}
+    if b["commit"]:
+        assert b["url"].endswith("/commit/" + b["commit"])
+    for page in ("/", "/docs"):
+        assert "/static/build.js" in app_client.get(page).text
+
+
 def test_setup_and_admin_rules(admin):
     c = admin
     st = c.get("/api/auth/state").json()

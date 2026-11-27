@@ -14,6 +14,7 @@ const SHELL = [
   '/static/style.css',
   '/static/app.js',
   '/static/docs.js',
+  '/static/build.js',
   '/static/icon.svg',
   '/static/icons/favicon-32.png',
   '/static/icons/icon-192.png',

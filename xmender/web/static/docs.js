@@ -328,7 +328,7 @@ const XDocs = (() => {
       el('header', { class: 'docs-page-head' },
         el('a', { href: '/', class: 'docs-brand' }, el('span', { class: 'wordmark' }, 'xMender'), el('span', { class: 'muted' }, ' docs')),
         el('a', { href: '/', class: 'btn small' }, 'Open xMender')),
-      body));
+      body, XBuild.footer()));
     const addr = () => decodeURIComponent(location.hash.replace(/^#/, ''));
     const view = await mount(body, {
       start: addr(),

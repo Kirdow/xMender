@@ -22,6 +22,8 @@ Your inbox itself is opened read-only: xMender never marks, moves, labels or del
 | HTTP webhooks | The body you wrote, with placeholders filled in. |
 | Google | Only the login and mail check for your inbox. |
 
+The page footer shows anyone, signed in or not, which xMender commit the server runs. It contains no account data.
+
 ## Masked addresses and keys {#masking}
 
 Connected Gmail addresses are shown masked (`j*****e@gmail.com`), and the Anthropic key as `sk-ant-••••`. On the **Integrations** page you can hold the eye button to see them. No other page can reveal them.

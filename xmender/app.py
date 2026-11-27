@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__
+from . import __version__, version
 from .api import auth, dashboard, integrations, tasks, users
 from .bootstrap import ensure_admin
 from .db import run_migrations
@@ -33,6 +33,7 @@ def create_app(*, start_poller: bool = True) -> FastAPI:
     async def lifespan(_: FastAPI):
         run_migrations()
         ensure_admin()
+        version.build_info()  # pin the commit that is running now
         if start_poller:
             poller.start()
         yield
@@ -61,6 +62,11 @@ def create_app(*, start_poller: bool = True) -> FastAPI:
 
     for r in (auth.router, users.router, integrations.router, tasks.router, dashboard.router):
         app.include_router(r)
+
+    # Public: the page footer shows it on the login and /docs pages too.
+    @app.get("/api/version", include_in_schema=False)
+    def build():
+        return {"version": __version__, **version.build_info()}
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

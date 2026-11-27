@@ -300,7 +300,7 @@ function page(main, title, sub, actions, ...content) {
   main.replaceChildren(h('div', { class: 'page' },
     h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, title), sub ? h('p', {}, sub) : null),
       actions ? h('div', { class: 'btn-row' }, actions) : null),
-    ...content));
+    ...content, XBuild.footer()));
 }
 
 // ── Auth screens ────────────────────────────────────────────────────────────
@@ -308,7 +308,7 @@ function page(main, title, sub, actions, ...content) {
 function authCard(note, ...content) {
   return h('div', { class: 'auth-wrap' }, h('div', { class: 'auth-card' },
     h('div', { class: 'logo' }, h('span', { class: 'wordmark' }, 'xMender')),
-    note ? h('p', { class: 'note' }, note) : null, ...content));
+    note ? h('p', { class: 'note' }, note) : null, ...content), XBuild.footer());
 }
 
 function authForm(fields, submitLabel, onsubmit, footer) {

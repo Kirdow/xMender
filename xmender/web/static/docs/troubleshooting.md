@@ -125,3 +125,6 @@ Home-screen apps on iOS keep their own sign-in, separate from Safari. Sign in on
 
 **I forgot my password.**
 Ask an admin to set a new one under **Admin → Set password**. The owner account (`admin`) can only be changed by itself, so xMender has no way yet to recover a forgotten owner password. Keep it in a password manager.
+
+**Which version of xMender is this?**
+The footer at the bottom of every page shows the commit the server is running and its date. Click the short hash to open that commit and its changes on GitHub. **+modified** means the server runs local changes on top of that commit. The footer shows the version the server started with, so after an update it changes only once the server is restarted.
