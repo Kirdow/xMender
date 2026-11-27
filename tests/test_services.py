@@ -825,7 +825,7 @@ class FakeIMAP:
         return "OK", [b"3"]
 
     def status(self, box, items):
-        return "OK", [b"INBOX (UIDVALIDITY 7 UIDNEXT 13)"]
+        return "OK", [b"INBOX (UIDVALIDITY 7 UIDNEXT 14)"]
 
     def uid(self, cmd, *args):
         self.calls.append((cmd, args))
@@ -833,9 +833,13 @@ class FakeIMAP:
             if self.fail_search:
                 raise gmail.imaplib.IMAP4.error("bad search")
             cat = args[-1]
-            return "OK", [{'"category:promotions"': b"11", '"category:updates"': b"12"}.get(cat, b"")]
+            return "OK", [{
+                '"category:primary"': b"13",
+                '"category:promotions"': b"11",
+                '"category:updates"': b"12 13",
+            }.get(cat, b"")]
         if cmd == "SEARCH":
-            return "OK", [b"10 11 12"]
+            return "OK", [b"10 11 12 13"]
         uid = args[0]
         meta = f'{uid} (X-GM-LABELS (\\Inbox "Bills") UID {uid} BODY[] {{3}}'.encode()
         return "OK", [(meta, b"raw"), b")"]
@@ -848,9 +852,11 @@ def test_fetch_gmail_labels_and_categories(monkeypatch):
     fake = FakeIMAP()
     monkeypatch.setattr(gmail, "_imap_login", lambda acct: fake)
     res = gmail.fetch_new(gmail.Account("a@gmail.com", "p"), 7, 9, 10)
-    assert [u for u, _ in res.messages] == [10, 11, 12]
+    assert [u for u, _ in res.messages] == [10, 11, 12, 13]
     assert res.gmail_meta[10] == {"labels": ["\\Inbox", "Bills"], "category": "primary"}
     assert res.gmail_meta[11]["category"] == "promotions" and res.gmail_meta[12]["category"] == "updates"
+    # tagged Updates but shown in the Primary tab: Primary wins
+    assert res.gmail_meta[13]["category"] == "primary"
     assert ("FETCH", ("10", "(BODY.PEEK[] X-GM-LABELS)")) in fake.calls
 
     # search failure: labels kept, category unknown, poll still succeeds

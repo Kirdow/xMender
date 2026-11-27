@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import email
 import imaplib
+import logging
 import re
 import smtplib
 import socket
@@ -18,6 +19,8 @@ from email import policy
 from email.message import EmailMessage
 from email.utils import parseaddr, parsedate_to_datetime
 from html.parser import HTMLParser
+
+log = logging.getLogger(__name__)
 
 IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
@@ -186,22 +189,31 @@ def _has_gmail_ext(conn: imaplib.IMAP4) -> bool:
 
 def _add_categories(conn: imaplib.IMAP4, result: FetchResult) -> None:
     """Fill `category` for fetched messages with one search per category.
-    Failures leave the category unknown rather than failing the poll."""
+    Failures leave the category unknown rather than failing the poll.
+
+    Primary is searched too and wins: Gmail can keep its Updates (or other)
+    category on a message while showing it in the Primary tab, so
+    `category:updates` alone does not say which tab the user sees it in.
+    No match at all also means Primary."""
     uids = [u for u, _ in result.messages]
     span = f"{min(uids)}:{max(uids)}"
-    found: dict[int, str] = {}
+    found: dict[int, list[str]] = {}
     try:
-        for cat in CATEGORIES[1:]:
+        for cat in CATEGORIES:
             typ, data = conn.uid("SEARCH", None, "UID", span, "X-GM-RAW", f'"category:{cat}"')
             if typ != "OK":
                 return
             for u in (data[0] or b"").split():
-                found.setdefault(int(u), cat)
+                found.setdefault(int(u), []).append(cat)
     except (imaplib.IMAP4.error, OSError, ValueError):
         return
     for uid in uids:
         if uid in result.gmail_meta:
-            result.gmail_meta[uid]["category"] = found.get(uid, "primary")
+            cats = found.get(uid) or ["primary"]
+            if len(cats) > 1:
+                log.info("Gmail UID %s matches categories %s; using %s", uid, cats,
+                         "primary" if "primary" in cats else cats[0])
+            result.gmail_meta[uid]["category"] = "primary" if "primary" in cats else cats[0]
 
 
 def _imap_utf7_decode(s: str) -> str:
