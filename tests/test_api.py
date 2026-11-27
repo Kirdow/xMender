@@ -175,6 +175,9 @@ def test_poller_processes_new_mail(admin, monkeypatch):
 
     feed = admin.get("/api/emails").json()["emails"]
     assert feed[0]["subject"] == "Invoice 7" and feed[0]["runs"][0]["status"] == "completed"
+    # SQLite returns naive datetimes; the API must send an explicit UTC offset
+    # or browsers read the time as local.
+    assert feed[0]["created_at"].endswith("+00:00")
 
 
 def test_usage_report(admin):

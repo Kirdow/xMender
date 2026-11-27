@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from ..config import get_settings
 from ..db import get_db
 from ..masking import mask_email
-from ..models import Email, Integration, TaskRun, User, utcnow
+from ..models import Email, Integration, TaskRun, User, as_utc, utcnow
 from ..services import llm, timewindow, usage
 from ..services.accounts import anthropic_key
 from ..services.poller import poller
@@ -71,8 +71,8 @@ def emails(
                 "sender": e.sender,
                 "subject": e.subject,
                 "snippet": e.snippet,
-                "sent_at": e.sent_at.isoformat() if e.sent_at else None,
-                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "sent_at": as_utc(e.sent_at).isoformat() if e.sent_at else None,
+                "created_at": as_utc(e.created_at).isoformat() if e.created_at else None,
                 "runs": runs.get(e.id, []),
             }
             for e in rows

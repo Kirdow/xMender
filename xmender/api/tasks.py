@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..masking import mask_email
-from ..models import Integration, Task, User
+from ..models import Integration, Task, User, as_utc
 from ..services import chains, gmail, llm, pipeline, signals
 from ..services.accounts import anthropic_key, discord_ids, http_ids
 from .deps import require
@@ -46,7 +46,7 @@ def _task_dict(t: Task) -> dict[str, Any]:
             {"task_id": t.depends_on_id, "status": t.depends_on_status or chains.DEFAULT_STATUSES}
             if t.depends_on_id else None
         ),
-        "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+        "updated_at": as_utc(t.updated_at).isoformat() if t.updated_at else None,
     }
 
 
