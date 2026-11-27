@@ -6,6 +6,8 @@ xMender checks every connected inbox on a fixed schedule: right when the server 
 
 **Refresh now** on the Dashboard checks all your inboxes immediately and tells you how many new emails were processed. If a check is already running for an inbox, the new one waits for it to finish.
 
+You do not need to reload the page to see mail from the regular checks: an open Dashboard picks it up within 30 seconds ([Live updates](#activity/live)).
+
 ## Only new mail {#only-new-mail}
 
 When you connect an inbox, xMender remembers where the inbox is "now" and only processes mail that arrives after that. Old mail is never run through tasks.

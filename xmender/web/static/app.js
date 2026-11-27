@@ -378,45 +378,247 @@ function renderRegister() {
 const STATUS_CHIP = { completed: 'lime', partial: 'pink', stopped: '', skipped: '', error: 'red' };
 const OUTCOME_CHIP = { pass: 'aqua', 'no-match': 'pink', stop: '', skip: '', sent: 'lime', error: 'red' };
 
+// The open Dashboard reloads its lists in place every DASH_REFRESH_SEC. This
+// only re-reads what the server already has; checking mail stays the poller's job.
+const DASH_REFRESH_SEC = 30;
+const NEW_SEEN_AFTER_MS = 12000; // page focused this long counts as "seen"...
+const NEW_LINGER_MS = 5000;      // ...and the "new" marks stay this much longer.
+
 async function viewDashboard(main) {
   const refreshBtn = h('button', { class: 'secondary', onclick: () => withBusy(refreshBtn, refresh) }, icon(ICONS.refresh), 'Refresh now');
+  const live = h('span', { class: 'live-note', title: 'This page reloads its lists on its own. It does not check mail; Refresh now does.' });
   const inboxes = h('div', { class: 'grid-cards' });
-  const feed = h('div', {});
-  page(main, 'Dashboard', 'New mail is checked automatically; refresh to check right away.', refreshBtn,
+  const feed = h('div', { class: 'feed' });
+  const divider = h('div', { class: 'new-divider', role: 'separator' }, 'new above');
+  main.classList.add('live'); // we keep the scroll position ourselves (keepScroll)
+  page(main, 'Dashboard', 'New mail is checked automatically; refresh to check right away.', [live, refreshBtn],
     h('h2', {}, h('span', { class: 'dot' }), 'Inboxes'), inboxes,
     h('h2', {}, h('span', { class: 'dot lime' }), 'Recent activity'), feed);
 
-  async function load() {
-    const [st, em] = await Promise.all([api('GET', '/api/status'), api('GET', '/api/emails?limit=50')]);
-    inboxes.replaceChildren(...(st.inboxes.length ? st.inboxes.map((i) => h('div', { class: 'card accent-aqua' },
-      h('div', { class: 'card-title' }, i.name),
-      h('div', { class: 'card-sub' }, i.email),
-      h('div', { class: 'chips' },
-        h('span', { class: 'chip' }, 'checked ' + fmtTime(i.last_polled_at)),
-        h('span', { class: 'chip' }, `every ${st.poll_interval_minutes} min`),
-        i.pending ? h('span', { class: 'chip pink' }, `${i.pending} queued`) : null,
-        i.last_error ? h('span', { class: 'chip red', title: i.last_error }, 'error') : h('span', { class: 'chip lime' }, 'ok')),
-      i.last_error ? h('div', { class: 'error-box mt mb0' }, i.last_error) : null))
-      : [h('div', { class: 'empty' }, 'No Gmail inbox connected yet. ', can('integrations') ? h('a', { href: '#/integrations' }, 'Connect one') : 'Ask an admin for access.')]));
+  const inboxCards = new Map(); // inbox id -> { el, sig }
+  const cards = new Map();      // email id -> { el, sig }
+  const fresh = new Set();      // email ids marked new
+  const baseTitle = document.title.replace(/^\(\d+\) /, '');
+  let first = true, loading = null, nextAt = 0, failed = 0, lastArrival = 0, focusSince = null;
 
-    feed.replaceChildren(...(em.emails.length ? em.emails.map(mailCard)
-      : [h('div', { class: 'empty' }, 'No mail processed yet. Only mail that arrives after an inbox is connected is processed.')]));
+  function load() {
+    if (!loading) loading = (async () => {
+      try {
+        const [st, em] = await Promise.all([api('GET', '/api/status'), api('GET', '/api/emails?limit=50')]);
+        if (!main.isConnected) return;
+        keepScroll(() => { renderInboxes(st); renderFeed(em.emails); });
+        first = false;
+        failed = 0;
+      } catch (e) {
+        if (failed++ === 0) toast(e.message, 'err');
+      } finally {
+        loading = null;
+        nextAt = Date.now() + DASH_REFRESH_SEC * 1000;
+        tick();
+      }
+    })();
+    return loading;
   }
 
   async function refresh() {
-    const r = await api('POST', '/api/poll');
+    let r;
+    try { r = await api('POST', '/api/poll'); } catch (e) { toast(e.message, 'err'); return; }
     const n = r.results.reduce((a, x) => a + (x.new || 0), 0);
     const errs = r.results.filter((x) => x.error);
     if (errs.length) toast(errs.map((e) => e.error).join(' · '), 'err');
     else toast(n ? `${n} new email${n > 1 ? 's' : ''} processed.` : 'No new mail.', 'ok');
+    await loading; // a reload already running started before the check
     await load();
   }
 
-  try { await load(); } catch (e) { toast(e.message, 'err'); }
+  // Content added or resized above the viewport must not move what the user is
+  // looking at: remember the first mail card that starts in view (else the one
+  // cut by the top edge) and scroll it back to the same spot.
+  function keepScroll(fn) {
+    const top = main.getBoundingClientRect().top;
+    let anchor = null;
+    if (feed.getBoundingClientRect().top < top) {
+      for (const el of feed.children) {
+        if (!el.classList.contains('mail')) continue;
+        const r = el.getBoundingClientRect();
+        if (r.bottom <= top) continue;
+        anchor = { id: Number(el.dataset.id), y: r.top };
+        if (r.top >= top) break;
+      }
+    }
+    fn();
+    const c = anchor && cards.get(anchor.id);
+    if (!c) return;
+    const dy = c.el.getBoundingClientRect().top - anchor.y;
+    if (dy) main.scrollTop += dy;
+  }
+
+  function renderInboxes(st) {
+    if (!st.inboxes.length) {
+      inboxCards.clear();
+      if (!inboxes.querySelector(':scope > .empty')) inboxes.replaceChildren(h('div', { class: 'empty' }, 'No Gmail inbox connected yet. ',
+        can('integrations') ? h('a', { href: '#/integrations' }, 'Connect one') : 'Ask an admin for access.'));
+      return;
+    }
+    inboxes.querySelector(':scope > .empty')?.remove();
+    const ids = new Set(st.inboxes.map((i) => i.id));
+    for (const [id, c] of inboxCards) if (!ids.has(id)) { c.el.remove(); inboxCards.delete(id); }
+    let prev = null;
+    for (const i of st.inboxes) {
+      const sig = JSON.stringify([i, st.poll_interval_minutes]);
+      let c = inboxCards.get(i.id);
+      if (!c) {
+        c = { el: inboxCard(i, st.poll_interval_minutes), sig };
+        if (prev) prev.after(c.el); else inboxes.prepend(c.el);
+        inboxCards.set(i.id, c);
+      } else if (c.sig !== sig && !hasSelection(c.el)) {
+        const el = inboxCard(i, st.poll_interval_minutes);
+        c.el.replaceWith(el);
+        c = { el, sig };
+        inboxCards.set(i.id, c);
+      }
+      prev = c.el;
+    }
+  }
+
+  // Cards are keyed by email id. Unchanged cards are left alone; a changed one
+  // (for example its task runs finished) is rebuilt with its open log, content,
+  // inner scroll and focus carried over. A card with selected text waits.
+  function renderFeed(list) {
+    const ids = new Set(list.map((m) => m.id));
+    for (const [id, c] of cards) {
+      if (ids.has(id) || hasSelection(c.el) || mailCardOpen(c.el)) continue;
+      c.el.remove(); cards.delete(id); fresh.delete(id);
+    }
+    if (!cards.size && !list.length) {
+      if (!feed.querySelector(':scope > .empty')) feed.replaceChildren(h('div', { class: 'empty' },
+        'No mail processed yet. Only mail that arrives after an inbox is connected is processed.'));
+    } else feed.querySelector(':scope > .empty')?.remove();
+    let prev = null, added = 0;
+    for (const m of list) {
+      const sig = JSON.stringify([m.subject, m.sender, m.snippet, m.runs]);
+      let c = cards.get(m.id);
+      if (!c) {
+        c = { el: mailCard(m), sig };
+        if (prev) prev.after(c.el); else feed.prepend(c.el);
+        cards.set(m.id, c);
+        if (!first) { fresh.add(m.id); c.el.classList.add('is-new'); added++; }
+      } else if (c.sig !== sig && !hasSelection(c.el)) {
+        const st = mailCardState(c.el);
+        const el = mailCard(m, st);
+        if (c.el.classList.contains('is-new')) el.classList.add('is-new');
+        c.el.replaceWith(el);
+        restoreMailCard(el, st);
+        c = { el, sig };
+        cards.set(m.id, c);
+      }
+      prev = c.el;
+    }
+    if (added) lastArrival = Date.now();
+    placeDivider();
+    updateTitle();
+  }
+
+  // The red bar sits under the newest unseen mail, above what was there before.
+  function placeDivider() {
+    let last = null;
+    for (const el of feed.children) if (el.classList.contains('is-new')) last = el;
+    let next = last && last.nextElementSibling;
+    if (next === divider) next = divider.nextElementSibling;
+    if (!last || !next) { divider.remove(); return; }
+    if (last.nextElementSibling !== divider) last.after(divider);
+  }
+
+  function updateTitle() {
+    document.title = fresh.size ? `(${fresh.size}) ${baseTitle}` : baseTitle;
+  }
+
+  function clearFresh() {
+    fresh.clear();
+    updateTitle();
+    const seen = [...feed.querySelectorAll('.mail.is-new')];
+    for (const el of seen) el.classList.add('seen');
+    divider.classList.add('seen');
+    setTimeout(() => keepScroll(() => {
+      for (const el of seen) el.classList.remove('is-new', 'seen');
+      divider.classList.remove('seen');
+      placeDivider();
+    }), 700);
+  }
+
+  function tick() {
+    if (!main.isConnected) { stop(); return; }
+    const now = Date.now();
+    if (document.visibilityState === 'visible' && document.hasFocus()) { if (focusSince === null) focusSince = now; }
+    else focusSince = null;
+    if (fresh.size && focusSince !== null && now >= Math.max(focusSince + NEW_SEEN_AFTER_MS, lastArrival) + NEW_LINGER_MS) clearFresh();
+    if (!loading && nextAt && now >= nextAt) load();
+    for (const el of main.querySelectorAll('[data-ts]')) {
+      const t = (el.dataset.pre || '') + fmtTime(el.dataset.ts || null);
+      if (el.textContent !== t) el.textContent = t;
+    }
+    const secs = Math.max(0, Math.ceil((nextAt - now) / 1000));
+    const text = loading ? 'Updating…' : failed ? `Update failed · retrying in ${secs}s` : `Next update in ${secs}s`;
+    if (live.textContent !== text) live.textContent = text;
+    live.classList.toggle('err', !loading && failed > 0);
+  }
+
+  const timer = setInterval(tick, 1000);
+  const wake = () => tick();
+  window.addEventListener('focus', wake);
+  window.addEventListener('blur', wake);
+  document.addEventListener('visibilitychange', wake);
+  function stop() {
+    clearInterval(timer);
+    window.removeEventListener('focus', wake);
+    window.removeEventListener('blur', wake);
+    document.removeEventListener('visibilitychange', wake);
+    document.title = baseTitle;
+  }
+
+  await load();
 }
 
-function mailCard(m) {
-  const log = h('div', { class: 'runlog hidden' }, m.runs.length ? m.runs.map((r) => h('div', { class: 'run' },
+function hasSelection(el) {
+  const sel = getSelection();
+  return !!(sel && !sel.isCollapsed && (el.contains(sel.anchorNode) || el.contains(sel.focusNode)));
+}
+
+function inboxCard(i, every) {
+  return h('div', { class: 'card accent-aqua' },
+    h('div', { class: 'card-title' }, i.name),
+    h('div', { class: 'card-sub' }, i.email),
+    h('div', { class: 'chips' },
+      h('span', { class: 'chip', dataset: { ts: i.last_polled_at || '', pre: 'checked ' } }, 'checked ' + fmtTime(i.last_polled_at)),
+      h('span', { class: 'chip' }, `every ${every} min`),
+      i.pending ? h('span', { class: 'chip pink' }, `${i.pending} queued`) : null,
+      i.last_error ? h('span', { class: 'chip red', title: i.last_error }, 'error') : h('span', { class: 'chip lime' }, 'ok')),
+    i.last_error ? h('div', { class: 'error-box mt mb0' }, i.last_error) : null);
+}
+
+function mailCardOpen(card) {
+  return [...card.querySelectorAll('.runlog, .snippet')].some((el) => !el.classList.contains('hidden'));
+}
+
+function mailCardState(card) {
+  const a = document.activeElement;
+  return {
+    log: !card.querySelector('.runlog').classList.contains('hidden'),
+    snippet: !!card.querySelector('.snippet:not(.hidden)'),
+    scroll: [...card.querySelectorAll('pre.response')].map((p) => p.scrollTop),
+    focus: a === card ? 'card' : a && card.contains(a) && a.classList.contains('expand') ? 'toggle' : null,
+  };
+}
+
+function restoreMailCard(card, st) {
+  card.querySelectorAll('pre.response').forEach((p, i) => { if (st.scroll[i]) p.scrollTop = st.scroll[i]; });
+  const f = st.focus === 'card' ? card : st.focus === 'toggle' ? card.querySelector('.expand') : null;
+  if (f) f.focus({ preventScroll: true });
+}
+
+function mailCard(m, st) {
+  st = st || {};
+  const log = h('div', { class: `runlog${st.log ? '' : ' hidden'}` }, m.runs.length ? m.runs.map((r) => h('div', { class: 'run' },
     h('div', { class: 'run-name' }, r.task_name, ' ', h('span', { class: `chip ${STATUS_CHIP[r.status] || ''}` }, r.status)),
     r.log.map((s) => [
       h('div', { class: 'step-line' }, h('span', { class: 'n' }, s.step ? s.step + '.' : '↳'),
@@ -425,21 +627,22 @@ function mailCard(m) {
           s.usage ? h('span', { title: exactUsd(s.usage.cost_nanousd) }, ` · ${fmtNum(s.usage.input_tokens)} in / ${fmtNum(s.usage.output_tokens)} out · ${fmtUsd(s.usage.cost_nanousd)}`) : null)),
       s.response ? h('pre', { class: 'response' }, s.response) : null,
     ]))) : h('div', { class: 'muted small' }, 'No task ran on this email.'));
-  const snippet = m.snippet ? h('div', { class: 'snippet hidden' }, m.snippet) : null;
-  const toggle = snippet ? h('button', { type: 'button', class: 'ghost small expand', title: 'Show content',
-    'aria-label': 'Show content', 'aria-expanded': 'false',
+  const open = !!(m.snippet && st.snippet);
+  const snippet = m.snippet ? h('div', { class: `snippet${open ? '' : ' hidden'}` }, m.snippet) : null;
+  const toggle = snippet ? h('button', { type: 'button', class: 'ghost small expand', title: open ? 'Hide content' : 'Show content',
+    'aria-label': open ? 'Hide content' : 'Show content', 'aria-expanded': String(open),
     onclick: (e) => {
       e.stopPropagation();
-      const open = snippet.classList.toggle('hidden') === false;
-      toggle.setAttribute('aria-expanded', String(open));
-      toggle.title = open ? 'Hide content' : 'Show content';
+      const now = snippet.classList.toggle('hidden') === false;
+      toggle.setAttribute('aria-expanded', String(now));
+      toggle.title = now ? 'Hide content' : 'Show content';
       toggle.setAttribute('aria-label', toggle.title);
     } }, icon(ICONS.chevron)) : null;
-  return h('div', { class: 'card mail', tabindex: '0',
+  return h('div', { class: 'card mail', tabindex: '0', dataset: { id: m.id },
     onclick: (e) => { if (!e.target.closest('pre, .snippet')) log.classList.toggle('hidden'); },
     onkeydown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) log.classList.toggle('hidden'); } },
   h('div', { class: 'card-head' }, h('div', { class: 'card-title' }, m.subject || '(no subject)'),
-    h('div', { class: 'mail-meta' }, h('span', { class: 'card-sub' }, fmtTime(m.created_at)), toggle)),
+    h('div', { class: 'mail-meta' }, h('span', { class: 'card-sub', dataset: { ts: m.created_at || '' } }, fmtTime(m.created_at)), toggle)),
   h('div', { class: 'card-sub' }, m.sender),
   snippet,
   h('div', { class: 'chips' }, m.runs.map((r) => h('span', { class: `chip ${STATUS_CHIP[r.status] || ''}` }, `${r.task_name}: ${r.status}`))),

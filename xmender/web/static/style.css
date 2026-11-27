@@ -215,6 +215,24 @@ button.chip { font-weight: 400; cursor: pointer; background: transparent; }
 .mail .expand svg { width: 16px; height: 16px; display: block; transition: transform 0.15s; }
 .mail .expand[aria-expanded=true] svg { transform: rotate(180deg); }
 .mail .expand[aria-expanded=true] { color: var(--primary); }
+/* Live dashboard: new-mail marks and the "new above" bar. */
+.main.live { overflow-anchor: none; }
+.live-note { color: var(--muted); font-size: 0.74rem; font-variant-numeric: tabular-nums; }
+.live-note.err { color: var(--danger); }
+.mail { transition: box-shadow 0.6s; }
+.mail.is-new { box-shadow: inset 3px 0 0 var(--danger); }
+.mail.is-new .mail-meta::before {
+  content: 'new'; font-size: 0.66rem; padding: 1px 7px; border-radius: 999px; transition: opacity 0.6s;
+  color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 60%, transparent);
+}
+.mail.is-new.seen { box-shadow: none; }
+.mail.is-new.seen .mail-meta::before { opacity: 0; }
+.new-divider {
+  display: flex; align-items: center; gap: 10px; margin: 6px 0 18px;
+  color: var(--danger); font-size: 0.7rem; letter-spacing: 0.04em; transition: opacity 0.6s;
+}
+.new-divider::before, .new-divider::after { content: ''; flex: 1; height: 2px; border-radius: 2px; background: var(--danger); }
+.new-divider.seen { opacity: 0; }
 .runlog { margin-top: 12px; border-top: 1px solid var(--faint); padding-top: 10px; }
 .runlog .run { margin-bottom: 10px; }
 .runlog .run-name { font-size: 0.8rem; font-weight: 600; margin-bottom: 6px; }

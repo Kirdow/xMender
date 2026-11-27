@@ -15,9 +15,28 @@ One card per connected Gmail inbox, with chips:
 
 **Refresh now** checks all your inboxes right away and reports how many new emails were processed, or the error. See [How mail is checked](#mail).
 
+## Live updates {#live}
+
+While the Dashboard is open, it reloads the inbox cards and Recent activity every 30 seconds. The line next to **Refresh now** counts down to the next update. This only shows what xMender already has; it does not check your mail any sooner. New mail still arrives at the regular check (`every N min`) or when you press **Refresh now**.
+
+Updates never get in your way:
+
+- Open run logs, opened email text, scroll positions and keyboard focus stay as they are. A card whose tasks finish in the meantime is updated in place.
+- Mail that arrives above where you are reading does not push the page; what you are looking at stays put.
+- A card with selected text is left alone until the selection is cleared.
+- An email you have open stays in the list even after newer mail pushes it past the 50 shown.
+
+If an update fails, the line says so and retries 30 seconds later.
+
+### New mail marks {#new-mail}
+
+Mail that appears while the page is open gets a red edge and a `new` badge, and a red **new above** bar separates it from what was there before. The browser tab title shows the count, for example `(2) xMender`, so you can see it from another tab.
+
+The marks clear by themselves once you are looking: after the page has had focus for about 12 seconds in a row, plus 5 more. If the page already has your focus when mail arrives, its marks stay for 5 seconds so you still notice it. Switching to another window or tab restarts the count.
+
 ## Recent activity {#recent-activity}
 
-The 50 most recent emails xMender processed, newest first. Each card shows the subject, when it was processed, the sender and one chip per task that ran: `Task name: result`.
+The 50 most recent emails xMender processed, newest first, kept up to date while the page is open (see [Live updates](#activity/live)). Each card shows the subject, when it was processed, the sender and one chip per task that ran: `Task name: result`.
 
 - **Click a card** to open the run log of every task for that email.
 - The **arrow** button shows the start of the email's text.
