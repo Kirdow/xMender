@@ -117,5 +117,11 @@ Simplify the pattern; avoid nested repeats like `(a+)+`.
 **Usage shows "price unknown".**
 The model is newer than xMender's price list. Tokens are still counted; the cost appears after an xMender update.
 
+**My browser offers no way to install xMender.**
+Installing needs `https://`, or `localhost` on the same computer; see [Installing xMender as an app](#account/install). Firefox on desktop does not install sites as apps. On iPhone and iPad use Safari's **Share → Add to Home Screen**.
+
+**The installed app on iPhone asks me to sign in again.**
+Home-screen apps on iOS keep their own sign-in, separate from Safari. Sign in once inside the app.
+
 **I forgot my password.**
 Ask an admin to set a new one under **Admin → Set password**. The owner account (`admin`) can only be changed by itself, so xMender has no way yet to recover a forgotten owner password. Keep it in a password manager.

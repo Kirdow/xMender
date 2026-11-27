@@ -51,6 +51,8 @@ xmender/
   services/       blocking domain logic: gmail, discord, llm, pricing, usage, prompts, filters, pipeline, accounts, poller
   web/static/     index.html, app.js, style.css, fonts, icon.svg (no build step)
                   docs.js + docs.html + docs/*.md: user docs (modal and /docs)
+                  PWA: manifest.webmanifest + sw.js (served at / by app.py), pwa.js
+                  registers it; icons/ from scripts/make-icons.sh. sw.js never caches /api/
 migrations/       Alembic (render_as_batch=True so ALTERs work on SQLite)
 deploy/           systemd unit template; scripts/install-service.sh fills @USER@/@GROUP@/@DIR@
 ```

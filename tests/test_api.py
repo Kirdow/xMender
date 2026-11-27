@@ -8,6 +8,35 @@ def test_csrf_header_required(app_client):
     assert r.status_code == 403
 
 
+def test_pwa_assets(app_client):
+    import json
+    import re
+
+    r = app_client.get("/manifest.webmanifest")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/manifest+json")
+    m = json.loads(r.text)
+    assert m["start_url"] == "/" and m["scope"] == "/" and m["display"] == "standalone"
+    sizes = {(i["sizes"], i.get("purpose", "any")) for i in m["icons"]}
+    assert {("192x192", "any"), ("512x512", "any"), ("512x512", "maskable")} <= sizes
+    for icon in m["icons"]:
+        assert app_client.get(icon["src"]).status_code == 200, icon["src"]
+
+    sw = app_client.get("/sw.js")
+    assert sw.status_code == 200
+    assert "javascript" in sw.headers["content-type"]
+    assert sw.headers["cache-control"] == "no-cache"
+    for path in re.findall(r"'(/[^']*)',", sw.text.split("];")[0]):
+        assert app_client.get(path).status_code == 200, path
+
+    for page in ("/", "/docs"):
+        html = app_client.get(page).text
+        for ref in ("/manifest.webmanifest", "/static/pwa.js", "apple-touch-icon", "theme-color"):
+            assert ref in html, (page, ref)
+        for src in re.findall(r'href="(/static/icons/[^"]+)"', html):
+            assert app_client.get(src).status_code == 200, src
+
+
 def test_setup_and_admin_rules(admin):
     c = admin
     st = c.get("/api/auth/state").json()

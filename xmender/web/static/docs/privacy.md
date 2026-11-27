@@ -9,6 +9,8 @@
 | Run logs | What each step did, including AI replies and the messages or bodies that were sent (up to 4,000 characters each). |
 | Usage | Tokens and cost per AI call. |
 
+If you [install xMender as an app](#account/install), your device keeps a copy of the app's own files (page layout, scripts, icons and docs pages) so it can open without a connection. Mail, tasks, settings and anything from your account are never stored there.
+
 Your inbox itself is opened read-only: xMender never marks, moves, labels or deletes mail.
 
 ## What leaves the server {#sent}

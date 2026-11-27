@@ -47,6 +47,10 @@ Copy `.env.example` to `.env` (it is git-ignored). Main keys:
 
 If you enable external access, put xMender behind a reverse proxy with HTTPS
 and turn on `XMENDER_SECURE_COOKIES`.
+HTTPS is also what lets phones and other machines install xMender as an app
+(PWA: `manifest.webmanifest`, `sw.js`); browsers only allow that on `https://`
+or `localhost`. After changing `xmender/web/static/icon.svg`, regenerate the
+PNG app icons with `scripts/make-icons.sh` (needs `rsvg-convert`).
 
 ## Data
 
